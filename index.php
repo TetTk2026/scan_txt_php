@@ -61,14 +61,36 @@
 
                     <div class="mt-4 d-none" id="resultBlock">
                         <label for="ocr_output" class="form-label fw-semibold">Erkannter und verbesserter Text</label>
-                        <textarea id="ocr_output" class="form-control" rows="10" readonly></textarea>
+                        <textarea id="ocr_output" class="form-control" rows="10"></textarea>
                         <div class="d-flex justify-content-between mt-2">
                             <small class="text-muted"><span id="charCount">0</span> Zeichen</small>
                             <button class="btn btn-outline-secondary btn-sm" id="copyBtn" type="button">Text kopieren</button>
                         </div>
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-start mt-3">
+                            <button class="btn btn-outline-primary btn-sm" id="spellcheckBtn" type="button">Schritt 3 (optional): Rechtschreibung korrigieren</button>
+                            <button class="btn btn-outline-dark btn-sm" id="selectionBtn" type="button">Schritt 4: Markierte Wörter übernehmen</button>
+                        </div>
+                        <small class="text-muted d-block mt-2" id="selectionHint">
+                            Markiere zuerst ein oder mehrere Wörter im Textfeld und klicke danach auf Schritt 4.
+                        </small>
                         <small class="text-muted d-block mt-2">
                             Tipp: Zeilenumbrüche, Worttrennungen und Absatzstruktur werden automatisch verbessert.
                         </small>
+                    </div>
+
+                    <div class="mt-4 d-none" id="selectionTableBlock">
+                        <label class="form-label fw-semibold">Markierte Wörter</label>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped align-middle mb-0" id="selectionTable">
+                                <thead>
+                                <tr>
+                                    <th scope="col">Wort</th>
+                                    <th scope="col" class="text-end">Anzahl Markierungen</th>
+                                </tr>
+                                </thead>
+                                <tbody id="selectionTableBody"></tbody>
+                            </table>
+                        </div>
                     </div>
 
                     <div class="mt-4 d-none" id="progressBlock">
@@ -100,6 +122,13 @@ const copyBtn = document.getElementById('copyBtn');
 const progressBlock = document.getElementById('progressBlock');
 const progressStatus = document.getElementById('progressStatus');
 const progressBar = document.getElementById('ocrProgress');
+const spellcheckBtn = document.getElementById('spellcheckBtn');
+const selectionBtn = document.getElementById('selectionBtn');
+const selectionHint = document.getElementById('selectionHint');
+const selectionTableBlock = document.getElementById('selectionTableBlock');
+const selectionTableBody = document.getElementById('selectionTableBody');
+
+const selectedWords = new Map();
 
 function showError(message) {
     errorMessage.textContent = message;
@@ -173,6 +202,74 @@ function normalizeOcrText(rawText) {
         .filter(Boolean);
 
     return formattedParagraphs.join('\n\n');
+}
+
+function updateSelectionTable() {
+    if (!selectionTableBody || !selectionTableBlock) {
+        return;
+    }
+
+    selectionTableBody.innerHTML = '';
+    const entries = Array.from(selectedWords.entries()).sort((a, b) => b[1] - a[1]);
+
+    if (entries.length === 0) {
+        selectionTableBlock.classList.add('d-none');
+        return;
+    }
+
+    for (const [word, count] of entries) {
+        const row = document.createElement('tr');
+        row.innerHTML = `<td>${word}</td><td class="text-end">${count}</td>`;
+        selectionTableBody.appendChild(row);
+    }
+
+    selectionTableBlock.classList.remove('d-none');
+}
+
+function extractWordsFromSelection(value) {
+    return (value || '')
+        .match(/[\p{L}\p{M}'’-]+/gu)
+        ?.map((word) => word.toLowerCase())
+        .filter(Boolean) || [];
+}
+
+async function correctGermanSpelling(text) {
+    if (!text.trim()) {
+        return text;
+    }
+
+    const params = new URLSearchParams({
+        text,
+        language: 'de-DE'
+    });
+
+    const response = await fetch('https://api.languagetool.org/v2/check', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: params.toString()
+    });
+
+    if (!response.ok) {
+        throw new Error('Spellcheck request failed');
+    }
+
+    const payload = await response.json();
+    const matches = Array.isArray(payload?.matches) ? payload.matches : [];
+
+    const applicable = matches
+        .filter((match) => Number.isInteger(match?.offset) && Number.isInteger(match?.length) && match.length > 0)
+        .filter((match) => Array.isArray(match?.replacements) && match.replacements[0]?.value)
+        .sort((a, b) => b.offset - a.offset);
+
+    let corrected = text;
+    for (const match of applicable) {
+        const replacement = match.replacements[0].value;
+        corrected = `${corrected.slice(0, match.offset)}${replacement}${corrected.slice(match.offset + match.length)}`;
+    }
+
+    return corrected;
 }
 
 if (fileInput) {
@@ -254,6 +351,8 @@ if (ocrForm) {
             outputField.value = improvedText;
             charCount.textContent = String(improvedText.length);
             resultBlock.classList.remove('d-none');
+            selectedWords.clear();
+            updateSelectionTable();
         } catch (error) {
             showError('OCR-Verarbeitung fehlgeschlagen. Bitte erneut versuchen.');
         } finally {
@@ -274,6 +373,58 @@ if (copyBtn && outputField) {
             }, 1200);
         } catch (error) {
             copyBtn.textContent = 'Kopieren fehlgeschlagen';
+        }
+    });
+}
+
+if (spellcheckBtn && outputField) {
+    spellcheckBtn.addEventListener('click', async () => {
+        clearError();
+        spellcheckBtn.disabled = true;
+        const originalLabel = spellcheckBtn.textContent;
+        spellcheckBtn.textContent = 'Korrigiere...';
+
+        try {
+            const correctedText = await correctGermanSpelling(outputField.value);
+            outputField.value = correctedText;
+            charCount.textContent = String(correctedText.length);
+        } catch (error) {
+            showError('Die Rechtschreibkorrektur ist aktuell nicht verfügbar. Bitte später erneut versuchen.');
+        } finally {
+            spellcheckBtn.disabled = false;
+            spellcheckBtn.textContent = originalLabel;
+        }
+    });
+}
+
+if (selectionBtn && outputField) {
+    selectionBtn.addEventListener('click', () => {
+        const { selectionStart, selectionEnd, value } = outputField;
+        if (selectionStart === selectionEnd) {
+            if (selectionHint) {
+                selectionHint.textContent = 'Bitte markiere mindestens ein Wort im Textfeld und klicke erneut auf Schritt 4.';
+            }
+            return;
+        }
+
+        const selectedText = value.slice(selectionStart, selectionEnd);
+        const words = extractWordsFromSelection(selectedText);
+
+        if (words.length === 0) {
+            if (selectionHint) {
+                selectionHint.textContent = 'Die Markierung enthält keine auswertbaren Wörter.';
+            }
+            return;
+        }
+
+        for (const word of words) {
+            const currentCount = selectedWords.get(word) || 0;
+            selectedWords.set(word, currentCount + 1);
+        }
+
+        updateSelectionTable();
+        if (selectionHint) {
+            selectionHint.textContent = `${words.length} Wort/Wörter übernommen.`;
         }
     });
 }
