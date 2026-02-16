@@ -60,12 +60,15 @@
                     <div class="alert alert-danger mt-4 mb-0 d-none" role="alert" id="errorMessage"></div>
 
                     <div class="mt-4 d-none" id="resultBlock">
-                        <label for="ocr_output" class="form-label fw-semibold">Erkannter Text</label>
+                        <label for="ocr_output" class="form-label fw-semibold">Erkannter und verbesserter Text</label>
                         <textarea id="ocr_output" class="form-control" rows="10" readonly></textarea>
                         <div class="d-flex justify-content-between mt-2">
                             <small class="text-muted"><span id="charCount">0</span> Zeichen</small>
                             <button class="btn btn-outline-secondary btn-sm" id="copyBtn" type="button">Text kopieren</button>
                         </div>
+                        <small class="text-muted d-block mt-2">
+                            Tipp: Zeilenumbrüche, Worttrennungen und Absatzstruktur werden automatisch verbessert.
+                        </small>
                     </div>
 
                     <div class="mt-4 d-none" id="progressBlock">
@@ -112,6 +115,64 @@ function resetProgress() {
     progressBar.style.width = '0%';
     progressBar.textContent = '0%';
     progressStatus.textContent = 'Initialisiere OCR...';
+}
+
+function normalizeOcrText(rawText) {
+    if (!rawText) {
+        return '';
+    }
+
+    const cleanedLines = rawText
+        .replace(/\r/g, '')
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]+/g, '')
+        .split('\n')
+        .map((line) => line.trim().replace(/\s+/g, ' '));
+
+    const paragraphs = [];
+    let currentParagraph = '';
+
+    const flushParagraph = () => {
+        if (!currentParagraph) {
+            return;
+        }
+        paragraphs.push(currentParagraph.trim());
+        currentParagraph = '';
+    };
+
+    for (const line of cleanedLines) {
+        if (!line) {
+            flushParagraph();
+            continue;
+        }
+
+        if (!currentParagraph) {
+            currentParagraph = line;
+            continue;
+        }
+
+        const endsWithHyphen = /[\p{L}]-$/u.test(currentParagraph);
+        if (endsWithHyphen) {
+            currentParagraph = `${currentParagraph.slice(0, -1)}${line}`;
+            continue;
+        }
+
+        currentParagraph = `${currentParagraph} ${line}`;
+    }
+
+    flushParagraph();
+
+    const formattedParagraphs = paragraphs
+        .map((paragraph) => paragraph
+            .replace(/\s+([,.;:!?])/g, '$1')
+            .replace(/([,.;:!?])(\p{L})/gu, '$1 $2')
+            .replace(/\(\s+/g, '(')
+            .replace(/\s+\)/g, ')')
+            .replace(/\s+/g, ' ')
+            .trim()
+        )
+        .filter(Boolean);
+
+    return formattedParagraphs.join('\n\n');
 }
 
 if (fileInput) {
@@ -181,15 +242,17 @@ if (ocrForm) {
                 }
             });
 
-            const text = (data?.text || '').trim();
-            if (!text) {
+            const rawText = (data?.text || '').trim();
+            const improvedText = normalizeOcrText(rawText);
+
+            if (!improvedText) {
                 showError('Kein Text erkannt. Bitte versuche ein schärferes Foto mit guter Beleuchtung.');
                 resultBlock.classList.add('d-none');
                 return;
             }
 
-            outputField.value = text;
-            charCount.textContent = String(text.length);
+            outputField.value = improvedText;
+            charCount.textContent = String(improvedText.length);
             resultBlock.classList.remove('d-none');
         } catch (error) {
             showError('OCR-Verarbeitung fehlgeschlagen. Bitte erneut versuchen.');

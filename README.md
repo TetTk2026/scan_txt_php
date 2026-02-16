@@ -4,6 +4,7 @@ Diese App bietet:
 
 1. **Schritt 1:** Foto einer Buchseite auswählen.
 2. **Schritt 2:** OCR-Umwandlung direkt im Browser (Client-seitig).
+3. **Automatische Textverbesserung:** Zeilenumbrüche, Worttrennungen und Absatzstruktur werden nach OCR bereinigt.
 
 ## Voraussetzungen
 
