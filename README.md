@@ -2,20 +2,15 @@
 
 Diese App bietet:
 
-1. **Schritt 1:** Foto einer Buchseite hochladen.
-2. **Schritt 2:** OCR-Umwandlung des Fotos in editierbaren Text.
+1. **Schritt 1:** Foto einer Buchseite auswählen.
+2. **Schritt 2:** OCR-Umwandlung direkt im Browser (Client-seitig).
 
 ## Voraussetzungen
 
 - PHP 8.1+
-- Tesseract OCR installiert (inkl. deutscher Sprachdaten)
+- Internetzugang für CDN-Assets (Bootstrap + Tesseract.js)
 
-Beispiel (Ubuntu/Debian):
-
-```bash
-sudo apt update
-sudo apt install -y tesseract-ocr tesseract-ocr-deu
-```
+> Es wird **kein** Tesseract auf dem Server benötigt, da die Texterkennung im Browser ausgeführt wird.
 
 ## Starten
 
@@ -29,6 +24,7 @@ Dann im Browser öffnen:
 
 ## Hinweise
 
-- Erlaubte Uploads: JPG, PNG, WEBP
+- Empfohlene Uploads: JPG, PNG, WEBP
 - Maximale Dateigröße: 8 MB
+- OCR-Sprachen: Deutsch + Englisch (`deu+eng`)
 - Oberfläche ist mit Bootstrap responsiv für Desktop und Mobile.
