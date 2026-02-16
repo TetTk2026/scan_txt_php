@@ -1,3 +1,84 @@
+<?php
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json; charset=utf-8');
+
+    $rawInput = file_get_contents('php://input');
+    $payload = json_decode($rawInput ?: '', true);
+
+    if (!is_array($payload) || ($payload['action'] ?? '') !== 'save_selected_words') {
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Ungültige Anfrage.'
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $words = $payload['words'] ?? [];
+    if (!is_array($words)) {
+        http_response_code(400);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Wortliste fehlt.'
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $normalized = [];
+    foreach ($words as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $word = trim((string)($item['word'] ?? ''));
+        if ($word === '') {
+            continue;
+        }
+
+        $normalized[] = [
+            'word' => $word,
+            'count' => max(1, (int)($item['count'] ?? 1)),
+            'ukrainianTranslation' => trim((string)($item['ukrainianTranslation'] ?? '')),
+        ];
+    }
+
+    $dataDir = __DIR__ . '/data';
+    if (!is_dir($dataDir) && !mkdir($dataDir, 0775, true) && !is_dir($dataDir)) {
+        http_response_code(500);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Speicherordner konnte nicht erstellt werden.'
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    $fileName = 'selected_words_' . date('Ymd_His') . '.json';
+    $targetPath = $dataDir . '/' . $fileName;
+
+    $content = json_encode([
+        'savedAt' => date(DATE_ATOM),
+        'count' => count($normalized),
+        'words' => $normalized
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    if ($content === false || file_put_contents($targetPath, $content) === false) {
+        http_response_code(500);
+        echo json_encode([
+            'success' => false,
+            'message' => 'JSON-Datei konnte nicht gespeichert werden.'
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    echo json_encode([
+        'success' => true,
+        'message' => 'Markierungen gespeichert.',
+        'file' => 'data/' . $fileName
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+?>
+
 <!doctype html>
 <html lang="de">
 <head>
@@ -69,7 +150,9 @@
                         <div class="d-grid gap-2 d-md-flex justify-content-md-start mt-3">
                             <button class="btn btn-outline-primary btn-sm" id="spellcheckBtn" type="button">Schritt 3 (optional): Rechtschreibung korrigieren</button>
                             <button class="btn btn-outline-dark btn-sm" id="selectionBtn" type="button">Schritt 4: Markierte Wörter übernehmen</button>
+                            <button class="btn btn-outline-success btn-sm" id="saveSelectionBtn" type="button">Schritt 6: Markierungen als JSON speichern</button>
                         </div>
+                        <small class="text-muted d-block mt-2" id="saveStatus"></small>
                         <small class="text-muted d-block mt-2" id="selectionHint">
                             Markiere zuerst ein oder mehrere Wörter im Textfeld und klicke danach auf Schritt 4.
                         </small>
@@ -86,6 +169,7 @@
                                 <tr>
                                     <th scope="col">Wort</th>
                                     <th scope="col" class="text-end">Anzahl Markierungen</th>
+                                    <th scope="col">Schritt 5: Ukrainische Übersetzung</th>
                                 </tr>
                                 </thead>
                                 <tbody id="selectionTableBody"></tbody>
@@ -127,8 +211,13 @@ const selectionBtn = document.getElementById('selectionBtn');
 const selectionHint = document.getElementById('selectionHint');
 const selectionTableBlock = document.getElementById('selectionTableBlock');
 const selectionTableBody = document.getElementById('selectionTableBody');
+const saveSelectionBtn = document.getElementById('saveSelectionBtn');
+const saveStatus = document.getElementById('saveStatus');
 
 const selectedWords = new Map();
+const ukrainianTranslations = new Map();
+
+let isOcrRunning = false;
 
 function showError(message) {
     errorMessage.textContent = message;
@@ -219,7 +308,20 @@ function updateSelectionTable() {
 
     for (const [word, count] of entries) {
         const row = document.createElement('tr');
-        row.innerHTML = `<td>${word}</td><td class="text-end">${count}</td>`;
+
+        const wordCell = document.createElement('td');
+        wordCell.textContent = word;
+
+        const countCell = document.createElement('td');
+        countCell.className = 'text-end';
+        countCell.textContent = String(count);
+
+        const translationCell = document.createElement('td');
+        translationCell.textContent = ukrainianTranslations.get(word) || '…';
+
+        row.appendChild(wordCell);
+        row.appendChild(countCell);
+        row.appendChild(translationCell);
         selectionTableBody.appendChild(row);
     }
 
@@ -232,6 +334,48 @@ function extractWordsFromSelection(value) {
         ?.map((word) => word.toLowerCase())
         .filter(Boolean) || [];
 }
+
+function buildSelectedWordsPayload() {
+    return Array.from(selectedWords.entries()).map(([word, count]) => ({
+        word,
+        count,
+        ukrainianTranslation: ukrainianTranslations.get(word) || ''
+    }));
+}
+
+
+async function translateWordToUkrainian(word) {
+    if (ukrainianTranslations.has(word)) {
+        return ukrainianTranslations.get(word);
+    }
+
+    try {
+        const endpoint = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=de|uk`;
+        const response = await fetch(endpoint);
+        if (!response.ok) {
+            throw new Error('Translation request failed');
+        }
+
+        const payload = await response.json();
+        const translated = payload?.responseData?.translatedText?.trim();
+        const value = translated ? translated : '—';
+        ukrainianTranslations.set(word, value);
+        return value;
+    } catch (error) {
+        ukrainianTranslations.set(word, '—');
+        return '—';
+    }
+}
+
+async function updateUkrainianTranslations(words) {
+    const uniqueWords = [...new Set(words)].filter((word) => !ukrainianTranslations.has(word));
+    if (uniqueWords.length === 0) {
+        return;
+    }
+
+    await Promise.all(uniqueWords.map((word) => translateWordToUkrainian(word)));
+}
+
 
 async function correctGermanSpelling(text) {
     if (!text.trim()) {
@@ -296,73 +440,85 @@ if (fileInput) {
         if (placeholderText) {
             placeholderText.remove();
         }
+
+        ocrForm?.requestSubmit();
     });
+}
+
+async function runOcrScan() {
+    clearError();
+
+    const file = fileInput.files?.[0];
+    if (!file) {
+        showError('Bitte wähle ein Bild aus, bevor du den OCR-Scan startest.');
+        return;
+    }
+
+    if (isOcrRunning) {
+        return;
+    }
+
+    if (typeof Tesseract === 'undefined') {
+        showError('OCR-Bibliothek konnte nicht geladen werden. Bitte Internetverbindung prüfen.');
+        return;
+    }
+
+    isOcrRunning = true;
+    extractBtn.disabled = true;
+    extractBtn.textContent = 'OCR läuft...';
+    progressBlock.classList.remove('d-none');
+    resetProgress();
+
+    try {
+        const { data } = await Tesseract.recognize(file, 'deu+eng', {
+            logger: (info) => {
+                if (!info || typeof info !== 'object') {
+                    return;
+                }
+
+                if (typeof info.progress === 'number') {
+                    const percent = Math.max(0, Math.min(100, Math.round(info.progress * 100)));
+                    progressBar.style.width = `${percent}%`;
+                    progressBar.textContent = `${percent}%`;
+                }
+
+                if (typeof info.status === 'string' && info.status.length > 0) {
+                    progressStatus.textContent = `Status: ${info.status}`;
+                }
+            }
+        });
+
+        const rawText = (data?.text || '').trim();
+        const improvedText = normalizeOcrText(rawText);
+
+        if (!improvedText) {
+            showError('Kein Text erkannt. Bitte versuche ein schärferes Foto mit guter Beleuchtung.');
+            resultBlock.classList.add('d-none');
+            return;
+        }
+
+        outputField.value = improvedText;
+        charCount.textContent = String(improvedText.length);
+        resultBlock.classList.remove('d-none');
+        selectedWords.clear();
+        ukrainianTranslations.clear();
+        updateSelectionTable();
+    } catch (error) {
+        showError('OCR-Verarbeitung fehlgeschlagen. Bitte erneut versuchen.');
+    } finally {
+        isOcrRunning = false;
+        extractBtn.disabled = false;
+        extractBtn.textContent = 'Schritt 2: Text extrahieren';
+        progressStatus.textContent = 'Fertig';
+    }
 }
 
 if (ocrForm) {
     ocrForm.addEventListener('submit', async (event) => {
         event.preventDefault();
-        clearError();
-
-        const file = fileInput.files?.[0];
-        if (!file) {
-            showError('Bitte wähle ein Bild aus, bevor du den OCR-Scan startest.');
-            return;
-        }
-
-        if (typeof Tesseract === 'undefined') {
-            showError('OCR-Bibliothek konnte nicht geladen werden. Bitte Internetverbindung prüfen.');
-            return;
-        }
-
-        extractBtn.disabled = true;
-        extractBtn.textContent = 'OCR läuft...';
-        progressBlock.classList.remove('d-none');
-        resetProgress();
-
-        try {
-            const { data } = await Tesseract.recognize(file, 'deu+eng', {
-                logger: (info) => {
-                    if (!info || typeof info !== 'object') {
-                        return;
-                    }
-
-                    if (typeof info.progress === 'number') {
-                        const percent = Math.max(0, Math.min(100, Math.round(info.progress * 100)));
-                        progressBar.style.width = `${percent}%`;
-                        progressBar.textContent = `${percent}%`;
-                    }
-
-                    if (typeof info.status === 'string' && info.status.length > 0) {
-                        progressStatus.textContent = `Status: ${info.status}`;
-                    }
-                }
-            });
-
-            const rawText = (data?.text || '').trim();
-            const improvedText = normalizeOcrText(rawText);
-
-            if (!improvedText) {
-                showError('Kein Text erkannt. Bitte versuche ein schärferes Foto mit guter Beleuchtung.');
-                resultBlock.classList.add('d-none');
-                return;
-            }
-
-            outputField.value = improvedText;
-            charCount.textContent = String(improvedText.length);
-            resultBlock.classList.remove('d-none');
-            selectedWords.clear();
-            updateSelectionTable();
-        } catch (error) {
-            showError('OCR-Verarbeitung fehlgeschlagen. Bitte erneut versuchen.');
-        } finally {
-            extractBtn.disabled = false;
-            extractBtn.textContent = 'Schritt 2: Text extrahieren';
-            progressStatus.textContent = 'Fertig';
-        }
+        await runOcrScan();
     });
 }
-
 if (copyBtn && outputField) {
     copyBtn.addEventListener('click', async () => {
         try {
@@ -398,7 +554,7 @@ if (spellcheckBtn && outputField) {
 }
 
 if (selectionBtn && outputField) {
-    selectionBtn.addEventListener('click', () => {
+    selectionBtn.addEventListener('click', async () => {
         const { selectionStart, selectionEnd, value } = outputField;
         if (selectionStart === selectionEnd) {
             if (selectionHint) {
@@ -423,11 +579,64 @@ if (selectionBtn && outputField) {
         }
 
         updateSelectionTable();
+        await updateUkrainianTranslations(words);
+        updateSelectionTable();
+
         if (selectionHint) {
-            selectionHint.textContent = `${words.length} Wort/Wörter übernommen.`;
+            selectionHint.textContent = `${words.length} Wort/Wörter übernommen und übersetzt.`;
         }
     });
 }
+
+if (saveSelectionBtn) {
+    saveSelectionBtn.addEventListener('click', async () => {
+        if (saveStatus) {
+            saveStatus.textContent = '';
+        }
+
+        const payload = buildSelectedWordsPayload();
+        if (payload.length === 0) {
+            if (saveStatus) {
+                saveStatus.textContent = 'Es sind noch keine markierten Wörter zum Speichern vorhanden.';
+            }
+            return;
+        }
+
+        saveSelectionBtn.disabled = true;
+        const originalLabel = saveSelectionBtn.textContent;
+        saveSelectionBtn.textContent = 'Speichere...';
+
+        try {
+            const response = await fetch(window.location.pathname, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    action: 'save_selected_words',
+                    words: payload
+                })
+            });
+
+            const result = await response.json();
+            if (!response.ok || !result?.success) {
+                throw new Error(result?.message || 'Speichern fehlgeschlagen');
+            }
+
+            if (saveStatus) {
+                saveStatus.textContent = `Gespeichert: ${result.file}`;
+            }
+        } catch (error) {
+            if (saveStatus) {
+                saveStatus.textContent = 'Speichern fehlgeschlagen. Bitte erneut versuchen.';
+            }
+        } finally {
+            saveSelectionBtn.disabled = false;
+            saveSelectionBtn.textContent = originalLabel;
+        }
+    });
+}
+
 </script>
 </body>
 </html>
