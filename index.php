@@ -638,15 +638,26 @@ if (textEditor) {
             return;
         }
 
-        for (const word of words) {
-            const currentCount = selectedWords.get(word) || 0;
-            selectedWords.set(word, currentCount + 1);
+        const uniqueWords = [...new Set(words)];
+        const addedWords = [];
+        const removedWords = [];
+
+        for (const word of uniqueWords) {
+            if (selectedWords.has(word)) {
+                selectedWords.delete(word);
+                wordDetails.delete(word);
+                removedWords.push(word);
+                continue;
+            }
+
+            selectedWords.set(word, 1);
+            addedWords.push(word);
         }
 
         applyHighlights();
         updateSelectionTable();
-        const uniqueWords = [...new Set(words)];
-        for (const word of uniqueWords) {
+
+        for (const word of addedWords) {
             try {
                 const details = await buildWordDetailsWithOptionB(word);
                 const sentenceExample = findSentenceForWord(getPlainText(), word);
@@ -671,10 +682,20 @@ if (textEditor) {
                 });
             }
         }
+
         updateSelectionTable();
 
         if (selectionHint) {
-            selectionHint.textContent = `Добавлено: ${words.join(', ')}`;
+            const messages = [];
+            if (addedWords.length > 0) {
+                messages.push(`Добавлено: ${addedWords.join(', ')}`);
+            }
+            if (removedWords.length > 0) {
+                messages.push(`Удалено: ${removedWords.join(', ')}`);
+            }
+            selectionHint.textContent = messages.length > 0
+                ? messages.join(' · ')
+                : 'Двойной клик по слову — добавить в словарь.';
         }
     });
 }
