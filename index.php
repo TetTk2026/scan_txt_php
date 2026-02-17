@@ -156,9 +156,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <table class="table table-sm table-striped align-middle mb-0" id="selectionTable">
                                 <thead>
                                 <tr>
-                                    <th scope="col">Wort</th>
-                                    <th scope="col">Übersetzungsvorschläge (UK)</th>
-                                    <th scope="col">Beispielsätze</th>
+                                    <th scope="col">Deutsches Wort</th>
+                                    <th scope="col">Український переклад</th>
+                                    <th scope="col">Приклад з тексту</th>
                                 </tr>
                                 </thead>
                                 <tbody id="selectionTableBody"></tbody>
@@ -255,16 +255,14 @@ function updateSelectionTable() {
         wordCell.textContent = word;
 
         const details = wordDetails.get(word) || { suggestions: [], examples: [] };
+        const primaryTranslation = details.suggestions[0] || '…';
+        const textExample = details.examples[0] || '—';
 
         const suggestionsCell = document.createElement('td');
-        suggestionsCell.innerHTML = details.suggestions.length
-            ? details.suggestions.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
-            : '…';
+        suggestionsCell.textContent = primaryTranslation;
 
         const examplesCell = document.createElement('td');
-        examplesCell.innerHTML = details.examples.length
-            ? details.examples.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
-            : '—';
+        examplesCell.textContent = textExample;
 
         row.appendChild(wordCell);
         row.appendChild(suggestionsCell);
@@ -282,6 +280,43 @@ function extractWordsFromSelection(value) {
         .filter(Boolean) || [];
 }
 
+
+function extractExampleSentence(text, word) {
+    if (!text || !word) {
+        return '';
+    }
+
+    const chunks = text
+        .split(/(?<=[.!?])\s+|\n+/u)
+        .map((chunk) => chunk.trim())
+        .filter(Boolean);
+
+    const wordRegex = new RegExp(`(^|[^\p{L}\p{M}'’-])${escapeRegExp(word)}(?=$|[^\p{L}\p{M}'’-])`, 'iu');
+    const found = chunks.find((chunk) => wordRegex.test(chunk));
+
+    if (found) {
+        return found;
+    }
+
+    return chunks[0] || '';
+}
+
+function ensureTextExamples(words) {
+    const sourceText = getPlainText();
+
+    for (const word of words) {
+        const details = wordDetails.get(word) || { suggestions: [], examples: [] };
+        if (!details.examples.length) {
+            const example = extractExampleSentence(sourceText, word);
+            if (example) {
+                details.examples = [example];
+            }
+        }
+
+        wordDetails.set(word, details);
+    }
+}
+
 function buildSelectedWordsPayload() {
     return Array.from(selectedWords.entries()).map(([word, count]) => ({
         word,
@@ -292,56 +327,115 @@ function buildSelectedWordsPayload() {
     }));
 }
 
-function buildWordDetailsFromMyMemory(payload, word) {
+const translationDictionary = new Map([
+    ['haus', ['будинок', 'дім']],
+    ['straße', ['вулиця', 'дорога']],
+    ['buch', ['книга']],
+    ['zeit', ['час']],
+    ['arbeit', ['робота', 'праця']],
+    ['leben', ['життя']],
+    ['essen', ['їжа', 'їсти']],
+    ['lernen', ['вчитися', 'навчатися']],
+    ['sprechen', ['говорити', 'розмовляти']],
+    ['gehen', ['йти', 'ходити']],
+    ['kommen', ['приходити', 'приїжджати']],
+    ['freund', ['друг', 'приятель']],
+    ['familie', ['сімʼя', 'родина']],
+    ['kinder', ['діти']],
+    ['gut', ['добре', 'хороший']],
+    ['schlecht', ['погано', 'поганий']],
+    ['groß', ['великий']],
+    ['klein', ['малий', 'маленький']]
+]);
+
+function getConfiguredMtProviders() {
+    const providers = window.translationProviders;
+    return Array.isArray(providers) ? providers.filter(Boolean) : [];
+}
+
+async function requestProviderTranslation(provider, word) {
+    const endpoint = String(provider?.endpoint || '').trim();
+    if (!endpoint) {
+        return null;
+    }
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            text: word,
+            sourceLang: 'de',
+            targetLang: 'uk',
+            provider: provider.name || 'mt-provider'
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error('MT provider request failed');
+    }
+
+    const payload = await response.json();
+    const translation = String(payload?.translation || '').trim();
+    return translation || null;
+}
+
+function rankTranslationCandidates(word, candidates, dictionaryCandidates) {
+    const unique = [...new Set([...candidates, ...dictionaryCandidates].map((item) => item.trim()).filter(Boolean))];
+
+    return unique
+        .map((candidate) => {
+            let score = 0;
+
+            if (dictionaryCandidates.includes(candidate)) {
+                score += 5;
+            }
+
+            if (candidate.length >= 3 && candidate.length <= 20) {
+                score += 2;
+            }
+
+            if (/^[\p{L}\p{M}'’-\s]+$/u.test(candidate)) {
+                score += 1;
+            }
+
+            if (candidate.toLowerCase().includes(word.toLowerCase())) {
+                score -= 2;
+            }
+
+            return { candidate, score };
+        })
+        .sort((a, b) => b.score - a.score)
+        .map((item) => item.candidate);
+}
+
+async function buildWordDetailsWithOptionB(word) {
     const fallback = { suggestions: ['—'], examples: [] };
+    const providers = getConfiguredMtProviders();
 
-    const primary = payload?.responseData?.translatedText?.trim();
-    const matches = Array.isArray(payload?.matches) ? payload.matches : [];
-
-    const suggestionSet = new Set();
-    if (primary) {
-        suggestionSet.add(primary);
-    }
-
-    for (const match of matches) {
-        const translation = String(match?.translation || '').trim();
-        if (!translation) {
-            continue;
-        }
-
-        suggestionSet.add(translation);
-        if (suggestionSet.size >= 4) {
-            break;
+    const providerResults = [];
+    for (const provider of providers) {
+        try {
+            const result = await requestProviderTranslation(provider, word);
+            if (result) {
+                providerResults.push(result);
+            }
+        } catch (error) {
+            // Provider failed: ignore and continue with other providers/dictionary ranking.
         }
     }
 
-    const examples = [];
-    for (const match of matches) {
-        const source = String(match?.segment || '').trim();
-        const target = String(match?.translation || '').trim();
+    const dictionaryCandidates = translationDictionary.get(word.toLowerCase()) || [];
+    const ranked = rankTranslationCandidates(word, providerResults, dictionaryCandidates).slice(0, 4);
 
-        if (!source || !target) {
-            continue;
-        }
-
-        if (source.toLowerCase() === word.toLowerCase() && target.length <= 24) {
-            continue;
-        }
-
-        examples.push(`DE: ${source} → UK: ${target}`);
-        if (examples.length >= 3) {
-            break;
-        }
-    }
-
-    const suggestions = [...suggestionSet].slice(0, 4);
-    if (suggestions.length === 0) {
+    if (ranked.length === 0) {
         return fallback;
     }
 
     return {
-        suggestions,
-        examples
+        suggestions: ranked,
+        examples: []
     };
 }
 
@@ -351,14 +445,7 @@ async function fetchWordDetails(word) {
     }
 
     try {
-        const endpoint = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=de|uk`;
-        const response = await fetch(endpoint);
-        if (!response.ok) {
-            throw new Error('Translation request failed');
-        }
-
-        const payload = await response.json();
-        const details = buildWordDetailsFromMyMemory(payload, word);
+        const details = await buildWordDetailsWithOptionB(word);
         wordDetails.set(word, details);
         return details;
     } catch (error) {
@@ -435,8 +522,10 @@ if (textEditor) {
         }
 
         applyHighlights();
+        ensureTextExamples(words);
         updateSelectionTable();
         await updateWordDetails(words);
+        ensureTextExamples(words);
         updateSelectionTable();
 
         if (selectionHint) {
