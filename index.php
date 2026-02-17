@@ -122,6 +122,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             padding: 0 .1em;
             border-radius: .2em;
         }
+        .save-expression-btn {
+            background-color: #ffd8a8;
+            border-color: #ffc078;
+            color: #5c3b00;
+            border-radius: 999px;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
+        .save-expression-btn:hover,
+        .save-expression-btn:focus {
+            background-color: #ffc078;
+            border-color: #ffa94d;
+            color: #4a2f00;
+        }
     </style>
 </head>
 <body>
@@ -131,7 +145,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="card app-card">
                 <div class="card-body p-3 p-md-4 p-lg-5">
                     <h1 class="h3 mb-3">📝 Текст и словарь</h1>
-                    <p class="text-muted mb-4">Вставь готовый текст. Двойной клик по слову добавляет его в словарь и подсвечивает зелёным во всём тексте.</p>
+                    <p class="text-muted mb-4">Вставь готовый текст. Выделяй немецкое выражение и нажимай «зберегти вираз», чтобы добавить его в словарь и подсветить в тексте.</p>
 
                     <label for="textEditor" class="form-label fw-semibold">Текст</label>
                     <div id="textEditor" class="form-control" contenteditable="true" data-placeholder="Вставь сюда готовый текст..."></div>
@@ -142,12 +156,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
 
                     <div class="d-grid gap-2 d-md-flex justify-content-md-start mt-3">
-                        <button class="btn btn-outline-primary btn-sm" id="spellcheckBtn" type="button">Rechtschreibung korrigieren</button>
-                        <button class="btn btn-outline-success btn-sm" id="saveSelectionBtn" type="button">Markierungen als JSON speichern</button>
+                        <button class="btn btn-sm save-expression-btn" id="saveExpressionBtn" type="button">зберегти вираз</button>
                     </div>
 
                     <div class="alert alert-danger mt-4 mb-0 d-none" role="alert" id="errorMessage"></div>
-                    <small class="text-muted d-block mt-2" id="selectionHint">Двойной клик по слову — добавить в словарь.</small>
+                    <small class="text-muted d-block mt-2" id="selectionHint">Выдели выражение и нажми «зберегти вираз».</small>
                     <small class="text-muted d-block mt-2" id="saveStatus"></small>
 
                     <div class="mt-4 d-none" id="selectionTableBlock">
@@ -176,11 +189,10 @@ const textEditor = document.getElementById('textEditor');
 const errorMessage = document.getElementById('errorMessage');
 const charCount = document.getElementById('charCount');
 const copyBtn = document.getElementById('copyBtn');
-const spellcheckBtn = document.getElementById('spellcheckBtn');
 const selectionHint = document.getElementById('selectionHint');
 const selectionTableBlock = document.getElementById('selectionTableBlock');
 const selectionTableBody = document.getElementById('selectionTableBody');
-const saveSelectionBtn = document.getElementById('saveSelectionBtn');
+const saveExpressionBtn = document.getElementById('saveExpressionBtn');
 const saveStatus = document.getElementById('saveStatus');
 
 const selectedWords = new Map();
@@ -401,6 +413,20 @@ function getWordsFromCurrentSelection() {
     }
 
     return extractWordsFromSelection(selection.toString());
+}
+
+function getExpressionFromCurrentSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+        return '';
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!textEditor.contains(range.commonAncestorContainer)) {
+        return '';
+    }
+
+    return selection.toString().replace(/\s+/g, ' ').trim();
 }
 
 
@@ -714,29 +740,60 @@ if (copyBtn) {
     });
 }
 
-if (spellcheckBtn) {
-    spellcheckBtn.addEventListener('click', async () => {
+if (saveExpressionBtn) {
+    saveExpressionBtn.addEventListener('click', async () => {
         clearError();
-        spellcheckBtn.disabled = true;
-        const originalLabel = spellcheckBtn.textContent;
-        spellcheckBtn.textContent = 'Korrigiere...';
-
-        try {
-            const correctedText = await correctGermanSpelling(getPlainText());
-            setPlainText(correctedText);
-        } catch (error) {
-            showError('Die Rechtschreibkorrektur ist aktuell nicht verfügbar. Bitte später erneut versuchen.');
-        } finally {
-            spellcheckBtn.disabled = false;
-            spellcheckBtn.textContent = originalLabel;
-        }
-    });
-}
-
-if (saveSelectionBtn) {
-    saveSelectionBtn.addEventListener('click', async () => {
         if (saveStatus) {
             saveStatus.textContent = '';
+        }
+
+        const expression = getExpressionFromCurrentSelection();
+        if (!expression) {
+            if (saveStatus) {
+                saveStatus.textContent = 'Спочатку виділи вираз у тексті.';
+            }
+            return;
+        }
+
+        const normalizedExpression = expression.toLowerCase();
+        selectedWords.set(normalizedExpression, (selectedWords.get(normalizedExpression) || 0) + 1);
+
+        const originalLabel = saveExpressionBtn.textContent;
+        saveExpressionBtn.disabled = true;
+        saveExpressionBtn.textContent = 'Зберігаю...';
+
+        try {
+            const details = await buildWordDetailsWithOptionB(normalizedExpression);
+            const sentenceExample = findSentenceForWord(getPlainText(), normalizedExpression);
+            if (sentenceExample && !details.examples.includes(sentenceExample)) {
+                details.examples = [sentenceExample, ...details.examples];
+            }
+            const currentDetails = wordDetails.get(normalizedExpression) || { suggestions: [], examples: [] };
+            wordDetails.set(normalizedExpression, {
+                ...details,
+                examples: (currentDetails.examples || []).length > 0
+                    ? currentDetails.examples
+                    : details.examples
+            });
+        } catch (error) {
+            const sentenceExample = findSentenceForWord(getPlainText(), normalizedExpression);
+            const currentDetails = wordDetails.get(normalizedExpression) || { suggestions: [], examples: [] };
+            wordDetails.set(normalizedExpression, {
+                suggestions: ['—'],
+                examples: (currentDetails.examples || []).length > 0
+                    ? currentDetails.examples
+                    : (sentenceExample ? [sentenceExample] : [])
+            });
+        } finally {
+            saveExpressionBtn.disabled = false;
+            saveExpressionBtn.textContent = originalLabel;
+        }
+
+        applyHighlights();
+        updateSelectionTable();
+
+        if (selectionHint) {
+            selectionHint.textContent = `Збережено вираз: ${normalizedExpression}`;
         }
 
         const payload = buildSelectedWordsPayload();
@@ -747,9 +804,8 @@ if (saveSelectionBtn) {
             return;
         }
 
-        saveSelectionBtn.disabled = true;
-        const originalLabel = saveSelectionBtn.textContent;
-        saveSelectionBtn.textContent = 'Speichere...';
+        saveExpressionBtn.disabled = true;
+        saveExpressionBtn.textContent = 'Speichere...';
 
         try {
             const response = await fetch(window.location.pathname, {
@@ -776,8 +832,8 @@ if (saveSelectionBtn) {
                 saveStatus.textContent = 'Speichern fehlgeschlagen. Bitte erneut versuchen.';
             }
         } finally {
-            saveSelectionBtn.disabled = false;
-            saveSelectionBtn.textContent = originalLabel;
+            saveExpressionBtn.disabled = false;
+            saveExpressionBtn.textContent = originalLabel;
         }
     });
 }
