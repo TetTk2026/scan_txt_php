@@ -433,8 +433,13 @@ async function requestProviderTranslation(provider, word) {
         },
         body: JSON.stringify({
             text: word,
+            q: word,
             sourceLang: 'de',
             targetLang: 'uk',
+            source: 'de',
+            target: 'uk',
+            from: 'de',
+            to: 'uk',
             provider: provider.name || 'mt-provider'
         })
     });
@@ -444,8 +449,36 @@ async function requestProviderTranslation(provider, word) {
     }
 
     const payload = await response.json();
-    const translation = String(payload?.translation || '').trim();
+    const translation = extractTranslationFromPayload(payload);
     return translation || null;
+}
+
+function extractTranslationFromPayload(payload) {
+    if (typeof payload === 'string') {
+        return payload.trim();
+    }
+
+    if (!payload || typeof payload !== 'object') {
+        return '';
+    }
+
+    const directCandidate = [
+        payload.translation,
+        payload.translatedText,
+        payload.targetText,
+        payload.text,
+        payload.result
+    ].find((value) => typeof value === 'string' && value.trim());
+
+    if (directCandidate) {
+        return directCandidate.trim();
+    }
+
+    const nestedCandidate = payload?.data?.translations?.[0]?.translatedText
+        || payload?.translations?.[0]?.text
+        || payload?.translation?.text;
+
+    return typeof nestedCandidate === 'string' ? nestedCandidate.trim() : '';
 }
 
 function rankTranslationCandidates(word, candidates, dictionaryCandidates) {
