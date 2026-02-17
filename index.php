@@ -394,9 +394,6 @@ function buildSelectedWordsPayload() {
     }));
 }
 
-const TRANSLATION_PIPELINE_MODE = 'Option B: Klassische MT + Wörterbuch + Ranking';
-const TRANSLATION_BASELINE = 'DeepL/Google/Microsoft als Basistranslation.';
-
 const translationDictionary = new Map([
     ['haus', ['будинок', 'дім']],
     ['straße', ['вулиця', 'дорога']],
@@ -481,10 +478,12 @@ function rankTranslationCandidates(word, candidates, dictionaryCandidates) {
 }
 
 async function buildWordDetailsWithOptionB(word) {
-    const fallback = { suggestions: ['—'], examples: [TRANSLATION_PIPELINE_MODE] };
+    const fallback = { suggestions: ['—'], examples: [] };
     const providers = getConfiguredMtProviders();
 
+    const dictionaryCandidates = translationDictionary.get(word.toLowerCase()) || [];
     const providerResults = [];
+
     for (const provider of providers) {
         try {
             const result = await requestProviderTranslation(provider, word);
@@ -496,26 +495,53 @@ async function buildWordDetailsWithOptionB(word) {
         }
     }
 
-    const dictionaryCandidates = translationDictionary.get(word.toLowerCase()) || [];
     const ranked = rankTranslationCandidates(word, providerResults, dictionaryCandidates).slice(0, 4);
 
     if (ranked.length === 0) {
         return fallback;
     }
 
-    const examples = [
-        TRANSLATION_PIPELINE_MODE,
-        TRANSLATION_BASELINE
-    ];
-
-    if (providers.length === 0) {
-        examples.push('Hinweis: Keine MT-Provider konfiguriert, Ranking basiert aktuell auf Wörterbuchdaten.');
-    }
-
     return {
         suggestions: ranked,
-        examples
+        examples: []
     };
+}
+
+function getWordFromCaret() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+        return '';
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!textEditor.contains(range.startContainer)) {
+        return '';
+    }
+
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) {
+        return '';
+    }
+
+    const text = node.textContent || '';
+    if (!text.trim()) {
+        return '';
+    }
+
+    const offset = range.startOffset;
+    const tokenRegex = /[\p{L}\p{M}'’-]+/gu;
+    let match;
+
+    while ((match = tokenRegex.exec(text)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+
+        if (offset >= start && offset <= end) {
+            return match[0].toLowerCase();
+        }
+    }
+
+    return '';
 }
 
 async function fetchWordDetails(word) {
@@ -591,7 +617,8 @@ if (textEditor) {
     });
 
     textEditor.addEventListener('dblclick', async () => {
-        const words = getWordsFromCurrentSelection();
+        const selectedFromRange = getWordsFromCurrentSelection();
+        const words = selectedFromRange.length > 0 ? selectedFromRange : [getWordFromCaret()].filter(Boolean);
 
         if (words.length === 0) {
             return;
