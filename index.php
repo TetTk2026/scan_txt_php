@@ -113,6 +113,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             white-space: pre-wrap;
             overflow-y: auto;
         }
+        #translationEditor {
+            min-height: 260px;
+            resize: vertical;
+        }
         #textEditor:empty::before {
             content: attr(data-placeholder);
             color: #6c757d;
@@ -140,15 +144,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
 <div class="container py-4 py-md-5">
-    <div class="row justify-content-center">
-        <div class="col-12 col-lg-9 col-xl-8">
+        <div class="row justify-content-center">
+        <div class="col-12 col-xl-11">
             <div class="card app-card">
                 <div class="card-body p-3 p-md-4 p-lg-5">
                     <h1 class="h3 mb-3">📝 Текст и словарь</h1>
                     <p class="text-muted mb-4">Вставь готовый текст. Выделяй немецкое выражение и нажимай «зберегти вираз», чтобы добавить его в словарь и подсветить в тексте.</p>
 
-                    <label for="textEditor" class="form-label fw-semibold">Текст</label>
-                    <div id="textEditor" class="form-control" contenteditable="true" data-placeholder="Вставь сюда готовый текст..."></div>
+                    <div class="row g-3">
+                        <div class="col-12 col-lg-6">
+                            <label for="textEditor" class="form-label fw-semibold">Німецький текст</label>
+                            <div id="textEditor" class="form-control" contenteditable="true" data-placeholder="Вставь сюда готовый текст..."></div>
+                        </div>
+                        <div class="col-12 col-lg-6">
+                            <label for="translationEditor" class="form-label fw-semibold">Український переклад (можна редагувати)</label>
+                            <textarea id="translationEditor" class="form-control" placeholder="Тут автоматично з'явиться переклад українською..."></textarea>
+                            <small class="text-muted d-block mt-2" id="translationStatus">Встав текст німецькою зліва, щоб отримати автоматичний переклад.</small>
+                        </div>
+                    </div>
 
                     <div class="d-flex justify-content-between mt-2">
                         <small class="text-muted"><span id="charCount">0</span> Zeichen</small>
@@ -189,6 +202,8 @@ const textEditor = document.getElementById('textEditor');
 const errorMessage = document.getElementById('errorMessage');
 const charCount = document.getElementById('charCount');
 const copyBtn = document.getElementById('copyBtn');
+const translationEditor = document.getElementById('translationEditor');
+const translationStatus = document.getElementById('translationStatus');
 const selectionHint = document.getElementById('selectionHint');
 const selectionTableBlock = document.getElementById('selectionTableBlock');
 const selectionTableBody = document.getElementById('selectionTableBody');
@@ -197,6 +212,8 @@ const saveStatus = document.getElementById('saveStatus');
 
 const selectedWords = new Map();
 const wordDetails = new Map();
+let translationDebounceTimer = null;
+let translationRequestId = 0;
 
 function showError(message) {
     errorMessage.textContent = message;
@@ -491,6 +508,60 @@ async function requestMyMemoryTranslation(word) {
     return [...new Set(candidates)];
 }
 
+async function requestMyMemoryTextTranslation(text) {
+    const params = new URLSearchParams({
+        q: text,
+        langpair: 'de|uk'
+    });
+
+    const response = await fetch(`https://api.mymemory.translated.net/get?${params.toString()}`);
+    if (!response.ok) {
+        throw new Error('Text translation request failed');
+    }
+
+    const payload = await response.json();
+    return String(payload?.responseData?.translatedText || '').trim();
+}
+
+function setTranslationStatus(message) {
+    if (translationStatus) {
+        translationStatus.textContent = message;
+    }
+}
+
+async function translateGermanTextToUkrainian(text, requestId) {
+    if (!translationEditor) {
+        return;
+    }
+
+    if (!text.trim()) {
+        translationEditor.value = '';
+        setTranslationStatus('Встав текст німецькою зліва, щоб отримати автоматичний переклад.');
+        return;
+    }
+
+    setTranslationStatus('Перекладаю...');
+
+    try {
+        const translated = await requestMyMemoryTextTranslation(text);
+        if (requestId !== translationRequestId) {
+            return;
+        }
+
+        translationEditor.value = translated || text;
+        setTranslationStatus(translated
+            ? 'Автоматичний переклад оновлено. За потреби відредагуй текст праворуч.'
+            : 'Не вдалося отримати переклад, показано оригінал.');
+    } catch (error) {
+        if (requestId !== translationRequestId) {
+            return;
+        }
+
+        translationEditor.value = text;
+        setTranslationStatus('Сервіс перекладу тимчасово недоступний. Можеш відредагувати текст вручну праворуч.');
+    }
+}
+
 function extractTranslationFromPayload(payload) {
     if (typeof payload === 'string') {
         return payload.trim();
@@ -654,6 +725,16 @@ if (textEditor) {
         applyHighlights();
         setCaretOffsetWithinEditor(caretOffset);
         updateCharCount();
+
+        if (translationDebounceTimer) {
+            clearTimeout(translationDebounceTimer);
+        }
+
+        const sourceText = getPlainText();
+        translationDebounceTimer = setTimeout(() => {
+            translationRequestId += 1;
+            translateGermanTextToUkrainian(sourceText, translationRequestId);
+        }, 600);
     });
 
     textEditor.addEventListener('dblclick', async () => {
