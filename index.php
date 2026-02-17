@@ -386,10 +386,17 @@ function ensureTextExamples(words) {
 
 function seedWordDetailsFromDictionary(words) {
     for (const word of words) {
-        const existing = wordDetails.get(word) || { suggestions: [], examples: [] };
         const dictionarySuggestions = translationDictionary.get(word.toLowerCase()) || [];
 
-        if (existing.suggestions.length === 0 && dictionarySuggestions.length > 0) {
+        // ❗ если в локальном словаре нет перевода — ничего не записываем,
+        // чтобы позже мог выполниться MyMemory
+        if (dictionarySuggestions.length === 0) {
+            continue;
+        }
+
+        const existing = wordDetails.get(word) || { suggestions: [], examples: [] };
+
+        if (existing.suggestions.length === 0) {
             existing.suggestions = dictionarySuggestions;
         }
 
