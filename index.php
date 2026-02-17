@@ -156,9 +156,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <table class="table table-sm table-striped align-middle mb-0" id="selectionTable">
                                 <thead>
                                 <tr>
-                                    <th scope="col">Wort</th>
-                                    <th scope="col">Übersetzungsvorschläge (UK)</th>
-                                    <th scope="col">Beispielsätze</th>
+                                    <th scope="col">Deutsches Wort</th>
+                                    <th scope="col">Український переклад</th>
+                                    <th scope="col">Приклад з тексту</th>
                                 </tr>
                                 </thead>
                                 <tbody id="selectionTableBody"></tbody>
@@ -255,16 +255,14 @@ function updateSelectionTable() {
         wordCell.textContent = word;
 
         const details = wordDetails.get(word) || { suggestions: [], examples: [] };
+        const primaryTranslation = details.suggestions[0] || '…';
+        const textExample = details.examples[0] || '—';
 
         const suggestionsCell = document.createElement('td');
-        suggestionsCell.innerHTML = details.suggestions.length
-            ? details.suggestions.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
-            : '…';
+        suggestionsCell.textContent = primaryTranslation;
 
         const examplesCell = document.createElement('td');
-        examplesCell.innerHTML = details.examples.length
-            ? details.examples.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
-            : '—';
+        examplesCell.textContent = textExample;
 
         row.appendChild(wordCell);
         row.appendChild(suggestionsCell);
@@ -280,6 +278,43 @@ function extractWordsFromSelection(value) {
         .match(/[\p{L}\p{M}'’-]+/gu)
         ?.map((word) => word.toLowerCase())
         .filter(Boolean) || [];
+}
+
+
+function extractExampleSentence(text, word) {
+    if (!text || !word) {
+        return '';
+    }
+
+    const chunks = text
+        .split(/(?<=[.!?])\s+|\n+/u)
+        .map((chunk) => chunk.trim())
+        .filter(Boolean);
+
+    const wordRegex = new RegExp(`(^|[^\p{L}\p{M}'’-])${escapeRegExp(word)}(?=$|[^\p{L}\p{M}'’-])`, 'iu');
+    const found = chunks.find((chunk) => wordRegex.test(chunk));
+
+    if (found) {
+        return found;
+    }
+
+    return chunks[0] || '';
+}
+
+function ensureTextExamples(words) {
+    const sourceText = getPlainText();
+
+    for (const word of words) {
+        const details = wordDetails.get(word) || { suggestions: [], examples: [] };
+        if (!details.examples.length) {
+            const example = extractExampleSentence(sourceText, word);
+            if (example) {
+                details.examples = [example];
+            }
+        }
+
+        wordDetails.set(word, details);
+    }
 }
 
 function buildSelectedWordsPayload() {
@@ -499,8 +534,10 @@ if (textEditor) {
         }
 
         applyHighlights();
+        ensureTextExamples(words);
         updateSelectionTable();
         await updateWordDetails(words);
+        ensureTextExamples(words);
         updateSelectionTable();
 
         if (selectionHint) {
