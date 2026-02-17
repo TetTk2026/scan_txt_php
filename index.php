@@ -45,18 +45,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $examples = [];
         }
 
-        $manualExamples = $item['manualExamples'] ?? [];
-        if (!is_array($manualExamples)) {
-            $manualExamples = [];
-        }
-
         $normalized[] = [
             'word' => $word,
             'count' => max(1, (int)($item['count'] ?? 1)),
             'ukrainianTranslation' => trim((string)($item['ukrainianTranslation'] ?? '')),
             'suggestions' => array_values(array_filter(array_map(static fn($value) => trim((string)$value), $suggestions))),
             'examples' => array_values(array_filter(array_map(static fn($value) => trim((string)$value), $examples))),
-            'manualExamples' => array_values(array_filter(array_map(static fn($value) => trim((string)$value), $manualExamples))),
         ];
     }
 
@@ -164,8 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <tr>
                                     <th scope="col">Deutsches Wort</th>
                                     <th scope="col">Український переклад</th>
-                                    <th scope="col">Приклад з тексту</th>
-                                    <th scope="col">Мої додаткові приклади</th>
+                                    <th scope="col">Приклад (можна редагувати)</th>
                                 </tr>
                                 </thead>
                                 <tbody id="selectionTableBody"></tbody>
@@ -315,36 +308,42 @@ function updateSelectionTable() {
         const wordCell = document.createElement('td');
         wordCell.textContent = word;
 
-        const details = wordDetails.get(word) || { suggestions: [], examples: [], manualExamples: [] };
+        const details = wordDetails.get(word) || { suggestions: [], examples: [] };
         const primaryTranslation = details.suggestions[0] || '…';
         const sentenceExample = findSentenceForWord(sourceText, word);
-        const textExample = sentenceExample || details.examples[0] || '—';
+        const savedExamples = Array.isArray(details.examples) ? details.examples : [];
+        const initialExamples = savedExamples.length > 0
+            ? savedExamples
+            : (sentenceExample ? [sentenceExample] : []);
+
+        if (savedExamples.length === 0 && initialExamples.length > 0) {
+            wordDetails.set(word, {
+                ...details,
+                examples: initialExamples
+            });
+        }
 
         const suggestionsCell = document.createElement('td');
         suggestionsCell.textContent = primaryTranslation;
 
         const examplesCell = document.createElement('td');
-        examplesCell.textContent = textExample;
-
-        const manualExamplesCell = document.createElement('td');
-        const manualExamplesInput = document.createElement('textarea');
-        manualExamplesInput.className = 'form-control form-control-sm';
-        manualExamplesInput.rows = 2;
-        manualExamplesInput.placeholder = 'Один приклад на рядок';
-        manualExamplesInput.value = (details.manualExamples || []).join('\n');
-        manualExamplesInput.addEventListener('input', () => {
+        const examplesInput = document.createElement('textarea');
+        examplesInput.className = 'form-control form-control-sm';
+        examplesInput.rows = 3;
+        examplesInput.placeholder = 'Автоматично додано приклад з тексту. Можна редагувати та дописувати свої приклади.';
+        examplesInput.value = initialExamples.join('\n');
+        examplesInput.addEventListener('input', () => {
             const currentDetails = wordDetails.get(word) || { suggestions: [], examples: [] };
             wordDetails.set(word, {
                 ...currentDetails,
-                manualExamples: parseManualExamples(manualExamplesInput.value)
+                examples: parseManualExamples(examplesInput.value)
             });
         });
-        manualExamplesCell.appendChild(manualExamplesInput);
+        examplesCell.appendChild(examplesInput);
 
         row.appendChild(wordCell);
         row.appendChild(suggestionsCell);
         row.appendChild(examplesCell);
-        row.appendChild(manualExamplesCell);
         selectionTableBody.appendChild(row);
     }
 
@@ -411,8 +410,7 @@ function buildSelectedWordsPayload() {
         count,
         ukrainianTranslation: (wordDetails.get(word)?.suggestions || [])[0] || '',
         suggestions: wordDetails.get(word)?.suggestions || [],
-        examples: wordDetails.get(word)?.examples || [],
-        manualExamples: wordDetails.get(word)?.manualExamples || []
+        examples: wordDetails.get(word)?.examples || []
     }));
 }
 
@@ -655,10 +653,22 @@ if (textEditor) {
                 if (sentenceExample && !details.examples.includes(sentenceExample)) {
                     details.examples = [sentenceExample, ...details.examples];
                 }
-                wordDetails.set(word, details);
+                const currentDetails = wordDetails.get(word) || { suggestions: [], examples: [] };
+                wordDetails.set(word, {
+                    ...details,
+                    examples: (currentDetails.examples || []).length > 0
+                        ? currentDetails.examples
+                        : details.examples
+                });
             } catch (error) {
                 const sentenceExample = findSentenceForWord(getPlainText(), word);
-                wordDetails.set(word, { suggestions: ['—'], examples: sentenceExample ? [sentenceExample] : [] });
+                const currentDetails = wordDetails.get(word) || { suggestions: [], examples: [] };
+                wordDetails.set(word, {
+                    suggestions: ['—'],
+                    examples: (currentDetails.examples || []).length > 0
+                        ? currentDetails.examples
+                        : (sentenceExample ? [sentenceExample] : [])
+                });
             }
         }
         updateSelectionTable();
