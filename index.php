@@ -480,7 +480,7 @@ async function requestMyMemoryTranslation(word) {
     const payload = await response.json();
     const candidates = [];
 
-    const primary = extractTranslationFromPayload(payload?.responseData?.translatedText || '');
+    const primary = String(payload?.responseData?.translatedText || '').trim();
     if (primary) {
         candidates.push(primary);
     }
@@ -564,7 +564,7 @@ async function buildWordDetailsWithOptionB(word) {
         const myMemoryResults = await requestMyMemoryTranslation(word);
         providerResults.push(...myMemoryResults);
     } catch (error) {
-        // MyMemory failed: continue with other providers/dictionary ranking.
+        console.warn('MyMemory failed:', error);
     }
 
     for (const provider of providers) {
@@ -625,31 +625,6 @@ function getWordFromCaret() {
     }
 
     return '';
-}
-
-async function fetchWordDetails(word) {
-    if (wordDetails.has(word)) {
-        return wordDetails.get(word);
-    }
-
-    try {
-        const details = await buildWordDetailsWithOptionB(word);
-        wordDetails.set(word, details);
-        return details;
-    } catch (error) {
-        const fallback = { suggestions: ['—'], examples: [] };
-        wordDetails.set(word, fallback);
-        return fallback;
-    }
-}
-
-async function updateWordDetails(words) {
-    const uniqueWords = [...new Set(words)].filter((word) => !wordDetails.has(word));
-    if (uniqueWords.length === 0) {
-        return;
-    }
-
-    await Promise.all(uniqueWords.map((word) => fetchWordDetails(word)));
 }
 
 async function correctGermanSpelling(text) {
@@ -716,7 +691,20 @@ if (textEditor) {
         seedWordDetailsFromDictionary(words);
         ensureTextExamples(words);
         updateSelectionTable();
-        await updateWordDetails(words);
+        const uniqueWords = [...new Set(words)];
+        for (const word of uniqueWords) {
+            if (wordDetails.has(word)) {
+                continue;
+            }
+
+            try {
+                const details = await buildWordDetailsWithOptionB(word);
+                wordDetails.set(word, details);
+            } catch (error) {
+                wordDetails.set(word, { suggestions: ['—'], examples: [] });
+            }
+        }
+
         ensureTextExamples(words);
         updateSelectionTable();
 
