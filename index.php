@@ -35,10 +35,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             continue;
         }
 
+        $suggestions = $item['suggestions'] ?? [];
+        if (!is_array($suggestions)) {
+            $suggestions = [];
+        }
+
+        $examples = $item['examples'] ?? [];
+        if (!is_array($examples)) {
+            $examples = [];
+        }
+
         $normalized[] = [
             'word' => $word,
             'count' => max(1, (int)($item['count'] ?? 1)),
             'ukrainianTranslation' => trim((string)($item['ukrainianTranslation'] ?? '')),
+            'suggestions' => array_values(array_filter(array_map(static fn($value) => trim((string)$value), $suggestions))),
+            'examples' => array_values(array_filter(array_map(static fn($value) => trim((string)$value), $examples))),
         ];
     }
 
@@ -145,7 +157,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <thead>
                                 <tr>
                                     <th scope="col">Wort</th>
-                                    <th scope="col">Ukrainische Übersetzung</th>
+                                    <th scope="col">Übersetzungsvorschläge (UK)</th>
+                                    <th scope="col">Beispielsätze</th>
                                 </tr>
                                 </thead>
                                 <tbody id="selectionTableBody"></tbody>
@@ -171,7 +184,7 @@ const saveSelectionBtn = document.getElementById('saveSelectionBtn');
 const saveStatus = document.getElementById('saveStatus');
 
 const selectedWords = new Map();
-const ukrainianTranslations = new Map();
+const wordDetails = new Map();
 
 function showError(message) {
     errorMessage.textContent = message;
@@ -241,11 +254,21 @@ function updateSelectionTable() {
         const wordCell = document.createElement('td');
         wordCell.textContent = word;
 
-        const translationCell = document.createElement('td');
-        translationCell.textContent = ukrainianTranslations.get(word) || '…';
+        const details = wordDetails.get(word) || { suggestions: [], examples: [] };
+
+        const suggestionsCell = document.createElement('td');
+        suggestionsCell.innerHTML = details.suggestions.length
+            ? details.suggestions.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
+            : '…';
+
+        const examplesCell = document.createElement('td');
+        examplesCell.innerHTML = details.examples.length
+            ? details.examples.map((item) => `<div>${escapeHtml(item)}</div>`).join('')
+            : '—';
 
         row.appendChild(wordCell);
-        row.appendChild(translationCell);
+        row.appendChild(suggestionsCell);
+        row.appendChild(examplesCell);
         selectionTableBody.appendChild(row);
     }
 
@@ -263,13 +286,68 @@ function buildSelectedWordsPayload() {
     return Array.from(selectedWords.entries()).map(([word, count]) => ({
         word,
         count,
-        ukrainianTranslation: ukrainianTranslations.get(word) || ''
+        ukrainianTranslation: (wordDetails.get(word)?.suggestions || [])[0] || '',
+        suggestions: wordDetails.get(word)?.suggestions || [],
+        examples: wordDetails.get(word)?.examples || []
     }));
 }
 
-async function translateWordToUkrainian(word) {
-    if (ukrainianTranslations.has(word)) {
-        return ukrainianTranslations.get(word);
+function buildWordDetailsFromMyMemory(payload, word) {
+    const fallback = { suggestions: ['—'], examples: [] };
+
+    const primary = payload?.responseData?.translatedText?.trim();
+    const matches = Array.isArray(payload?.matches) ? payload.matches : [];
+
+    const suggestionSet = new Set();
+    if (primary) {
+        suggestionSet.add(primary);
+    }
+
+    for (const match of matches) {
+        const translation = String(match?.translation || '').trim();
+        if (!translation) {
+            continue;
+        }
+
+        suggestionSet.add(translation);
+        if (suggestionSet.size >= 4) {
+            break;
+        }
+    }
+
+    const examples = [];
+    for (const match of matches) {
+        const source = String(match?.segment || '').trim();
+        const target = String(match?.translation || '').trim();
+
+        if (!source || !target) {
+            continue;
+        }
+
+        if (source.toLowerCase() === word.toLowerCase() && target.length <= 24) {
+            continue;
+        }
+
+        examples.push(`DE: ${source} → UK: ${target}`);
+        if (examples.length >= 3) {
+            break;
+        }
+    }
+
+    const suggestions = [...suggestionSet].slice(0, 4);
+    if (suggestions.length === 0) {
+        return fallback;
+    }
+
+    return {
+        suggestions,
+        examples
+    };
+}
+
+async function fetchWordDetails(word) {
+    if (wordDetails.has(word)) {
+        return wordDetails.get(word);
     }
 
     try {
@@ -280,23 +358,23 @@ async function translateWordToUkrainian(word) {
         }
 
         const payload = await response.json();
-        const translated = payload?.responseData?.translatedText?.trim();
-        const value = translated ? translated : '—';
-        ukrainianTranslations.set(word, value);
-        return value;
+        const details = buildWordDetailsFromMyMemory(payload, word);
+        wordDetails.set(word, details);
+        return details;
     } catch (error) {
-        ukrainianTranslations.set(word, '—');
-        return '—';
+        const fallback = { suggestions: ['—'], examples: [] };
+        wordDetails.set(word, fallback);
+        return fallback;
     }
 }
 
-async function updateUkrainianTranslations(words) {
-    const uniqueWords = [...new Set(words)].filter((word) => !ukrainianTranslations.has(word));
+async function updateWordDetails(words) {
+    const uniqueWords = [...new Set(words)].filter((word) => !wordDetails.has(word));
     if (uniqueWords.length === 0) {
         return;
     }
 
-    await Promise.all(uniqueWords.map((word) => translateWordToUkrainian(word)));
+    await Promise.all(uniqueWords.map((word) => fetchWordDetails(word)));
 }
 
 async function correctGermanSpelling(text) {
@@ -358,7 +436,7 @@ if (textEditor) {
 
         applyHighlights();
         updateSelectionTable();
-        await updateUkrainianTranslations(words);
+        await updateWordDetails(words);
         updateSelectionTable();
 
         if (selectionHint) {
