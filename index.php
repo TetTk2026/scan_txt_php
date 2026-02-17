@@ -45,12 +45,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $examples = [];
         }
 
+        $manualExamples = $item['manualExamples'] ?? [];
+        if (!is_array($manualExamples)) {
+            $manualExamples = [];
+        }
+
         $normalized[] = [
             'word' => $word,
             'count' => max(1, (int)($item['count'] ?? 1)),
             'ukrainianTranslation' => trim((string)($item['ukrainianTranslation'] ?? '')),
             'suggestions' => array_values(array_filter(array_map(static fn($value) => trim((string)$value), $suggestions))),
             'examples' => array_values(array_filter(array_map(static fn($value) => trim((string)$value), $examples))),
+            'manualExamples' => array_values(array_filter(array_map(static fn($value) => trim((string)$value), $manualExamples))),
         ];
     }
 
@@ -159,6 +165,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     <th scope="col">Deutsches Wort</th>
                                     <th scope="col">Український переклад</th>
                                     <th scope="col">Приклад з тексту</th>
+                                    <th scope="col">Мої додаткові приклади</th>
                                 </tr>
                                 </thead>
                                 <tbody id="selectionTableBody"></tbody>
@@ -308,7 +315,7 @@ function updateSelectionTable() {
         const wordCell = document.createElement('td');
         wordCell.textContent = word;
 
-        const details = wordDetails.get(word) || { suggestions: [], examples: [] };
+        const details = wordDetails.get(word) || { suggestions: [], examples: [], manualExamples: [] };
         const primaryTranslation = details.suggestions[0] || '…';
         const sentenceExample = findSentenceForWord(sourceText, word);
         const textExample = sentenceExample || details.examples[0] || '—';
@@ -319,13 +326,36 @@ function updateSelectionTable() {
         const examplesCell = document.createElement('td');
         examplesCell.textContent = textExample;
 
+        const manualExamplesCell = document.createElement('td');
+        const manualExamplesInput = document.createElement('textarea');
+        manualExamplesInput.className = 'form-control form-control-sm';
+        manualExamplesInput.rows = 2;
+        manualExamplesInput.placeholder = 'Один приклад на рядок';
+        manualExamplesInput.value = (details.manualExamples || []).join('\n');
+        manualExamplesInput.addEventListener('input', () => {
+            const currentDetails = wordDetails.get(word) || { suggestions: [], examples: [] };
+            wordDetails.set(word, {
+                ...currentDetails,
+                manualExamples: parseManualExamples(manualExamplesInput.value)
+            });
+        });
+        manualExamplesCell.appendChild(manualExamplesInput);
+
         row.appendChild(wordCell);
         row.appendChild(suggestionsCell);
         row.appendChild(examplesCell);
+        row.appendChild(manualExamplesCell);
         selectionTableBody.appendChild(row);
     }
 
     selectionTableBlock.classList.remove('d-none');
+}
+
+function parseManualExamples(value) {
+    return (value || '')
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
 }
 
 function findSentenceForWord(text, word) {
@@ -381,7 +411,8 @@ function buildSelectedWordsPayload() {
         count,
         ukrainianTranslation: (wordDetails.get(word)?.suggestions || [])[0] || '',
         suggestions: wordDetails.get(word)?.suggestions || [],
-        examples: wordDetails.get(word)?.examples || []
+        examples: wordDetails.get(word)?.examples || [],
+        manualExamples: wordDetails.get(word)?.manualExamples || []
     }));
 }
 
