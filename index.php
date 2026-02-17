@@ -292,55 +292,126 @@ function buildSelectedWordsPayload() {
     }));
 }
 
-function buildWordDetailsFromMyMemory(payload, word) {
-    const fallback = { suggestions: ['—'], examples: [] };
+const TRANSLATION_PIPELINE_MODE = 'Option B: Klassische MT + Wörterbuch + Ranking';
+const TRANSLATION_BASELINE = 'DeepL/Google/Microsoft als Basistranslation.';
 
-    const primary = payload?.responseData?.translatedText?.trim();
-    const matches = Array.isArray(payload?.matches) ? payload.matches : [];
+const translationDictionary = new Map([
+    ['haus', ['будинок', 'дім']],
+    ['straße', ['вулиця', 'дорога']],
+    ['buch', ['книга']],
+    ['zeit', ['час']],
+    ['arbeit', ['робота', 'праця']],
+    ['leben', ['життя']],
+    ['essen', ['їжа', 'їсти']],
+    ['lernen', ['вчитися', 'навчатися']],
+    ['sprechen', ['говорити', 'розмовляти']],
+    ['gehen', ['йти', 'ходити']],
+    ['kommen', ['приходити', 'приїжджати']],
+    ['freund', ['друг', 'приятель']],
+    ['familie', ['сімʼя', 'родина']],
+    ['kinder', ['діти']],
+    ['gut', ['добре', 'хороший']],
+    ['schlecht', ['погано', 'поганий']],
+    ['groß', ['великий']],
+    ['klein', ['малий', 'маленький']]
+]);
 
-    const suggestionSet = new Set();
-    if (primary) {
-        suggestionSet.add(primary);
+function getConfiguredMtProviders() {
+    const providers = window.translationProviders;
+    return Array.isArray(providers) ? providers.filter(Boolean) : [];
+}
+
+async function requestProviderTranslation(provider, word) {
+    const endpoint = String(provider?.endpoint || '').trim();
+    if (!endpoint) {
+        return null;
     }
 
-    for (const match of matches) {
-        const translation = String(match?.translation || '').trim();
-        if (!translation) {
-            continue;
-        }
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            text: word,
+            sourceLang: 'de',
+            targetLang: 'uk',
+            provider: provider.name || 'mt-provider'
+        })
+    });
 
-        suggestionSet.add(translation);
-        if (suggestionSet.size >= 4) {
-            break;
+    if (!response.ok) {
+        throw new Error('MT provider request failed');
+    }
+
+    const payload = await response.json();
+    const translation = String(payload?.translation || '').trim();
+    return translation || null;
+}
+
+function rankTranslationCandidates(word, candidates, dictionaryCandidates) {
+    const unique = [...new Set([...candidates, ...dictionaryCandidates].map((item) => item.trim()).filter(Boolean))];
+
+    return unique
+        .map((candidate) => {
+            let score = 0;
+
+            if (dictionaryCandidates.includes(candidate)) {
+                score += 5;
+            }
+
+            if (candidate.length >= 3 && candidate.length <= 20) {
+                score += 2;
+            }
+
+            if (/^[\p{L}\p{M}'’-\s]+$/u.test(candidate)) {
+                score += 1;
+            }
+
+            if (candidate.toLowerCase().includes(word.toLowerCase())) {
+                score -= 2;
+            }
+
+            return { candidate, score };
+        })
+        .sort((a, b) => b.score - a.score)
+        .map((item) => item.candidate);
+}
+
+async function buildWordDetailsWithOptionB(word) {
+    const fallback = { suggestions: ['—'], examples: [TRANSLATION_PIPELINE_MODE] };
+    const providers = getConfiguredMtProviders();
+
+    const providerResults = [];
+    for (const provider of providers) {
+        try {
+            const result = await requestProviderTranslation(provider, word);
+            if (result) {
+                providerResults.push(result);
+            }
+        } catch (error) {
+            // Provider failed: ignore and continue with other providers/dictionary ranking.
         }
     }
 
-    const examples = [];
-    for (const match of matches) {
-        const source = String(match?.segment || '').trim();
-        const target = String(match?.translation || '').trim();
+    const dictionaryCandidates = translationDictionary.get(word.toLowerCase()) || [];
+    const ranked = rankTranslationCandidates(word, providerResults, dictionaryCandidates).slice(0, 4);
 
-        if (!source || !target) {
-            continue;
-        }
-
-        if (source.toLowerCase() === word.toLowerCase() && target.length <= 24) {
-            continue;
-        }
-
-        examples.push(`DE: ${source} → UK: ${target}`);
-        if (examples.length >= 3) {
-            break;
-        }
-    }
-
-    const suggestions = [...suggestionSet].slice(0, 4);
-    if (suggestions.length === 0) {
+    if (ranked.length === 0) {
         return fallback;
     }
 
+    const examples = [
+        TRANSLATION_PIPELINE_MODE,
+        TRANSLATION_BASELINE
+    ];
+
+    if (providers.length === 0) {
+        examples.push('Hinweis: Keine MT-Provider konfiguriert, Ranking basiert aktuell auf Wörterbuchdaten.');
+    }
+
     return {
-        suggestions,
+        suggestions: ranked,
         examples
     };
 }
@@ -351,14 +422,7 @@ async function fetchWordDetails(word) {
     }
 
     try {
-        const endpoint = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(word)}&langpair=de|uk`;
-        const response = await fetch(endpoint);
-        if (!response.ok) {
-            throw new Error('Translation request failed');
-        }
-
-        const payload = await response.json();
-        const details = buildWordDetailsFromMyMemory(payload, word);
+        const details = await buildWordDetailsWithOptionB(word);
         wordDetails.set(word, details);
         return details;
     } catch (error) {
