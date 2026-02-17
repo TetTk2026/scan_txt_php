@@ -145,7 +145,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <thead>
                                 <tr>
                                     <th scope="col">Wort</th>
-                                    <th scope="col" class="text-end">Anzahl</th>
                                     <th scope="col">Ukrainische Übersetzung</th>
                                 </tr>
                                 </thead>
@@ -242,15 +241,10 @@ function updateSelectionTable() {
         const wordCell = document.createElement('td');
         wordCell.textContent = word;
 
-        const countCell = document.createElement('td');
-        countCell.className = 'text-end';
-        countCell.textContent = String(count);
-
         const translationCell = document.createElement('td');
         translationCell.textContent = ukrainianTranslations.get(word) || '…';
 
         row.appendChild(wordCell);
-        row.appendChild(countCell);
         row.appendChild(translationCell);
         selectionTableBody.appendChild(row);
     }
