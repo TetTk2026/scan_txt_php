@@ -215,6 +215,59 @@ function getPlainText() {
         .replace(/\r/g, '');
 }
 
+function getCaretOffsetWithinEditor() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+        return null;
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!textEditor.contains(range.startContainer)) {
+        return null;
+    }
+
+    const preCaretRange = range.cloneRange();
+    preCaretRange.selectNodeContents(textEditor);
+    preCaretRange.setEnd(range.startContainer, range.startOffset);
+
+    return preCaretRange.toString().length;
+}
+
+function setCaretOffsetWithinEditor(offset) {
+    if (!Number.isInteger(offset) || offset < 0) {
+        return;
+    }
+
+    const selection = window.getSelection();
+    if (!selection) {
+        return;
+    }
+
+    const range = document.createRange();
+    let current = 0;
+    const walker = document.createTreeWalker(textEditor, NodeFilter.SHOW_TEXT);
+
+    while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const next = current + node.textContent.length;
+
+        if (offset <= next) {
+            range.setStart(node, Math.max(0, offset - current));
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            return;
+        }
+
+        current = next;
+    }
+
+    range.selectNodeContents(textEditor);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+}
+
 function setPlainText(value) {
     textEditor.textContent = value;
     applyHighlights();
@@ -278,6 +331,20 @@ function extractWordsFromSelection(value) {
         .match(/[\p{L}\p{M}'’-]+/gu)
         ?.map((word) => word.toLowerCase())
         .filter(Boolean) || [];
+}
+
+function getWordsFromCurrentSelection() {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+        return [];
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!textEditor.contains(range.commonAncestorContainer)) {
+        return [];
+    }
+
+    return extractWordsFromSelection(selection.toString());
 }
 
 
@@ -517,12 +584,14 @@ async function correctGermanSpelling(text) {
 
 if (textEditor) {
     textEditor.addEventListener('input', () => {
+        const caretOffset = getCaretOffsetWithinEditor();
+        applyHighlights();
+        setCaretOffsetWithinEditor(caretOffset);
         updateCharCount();
     });
 
     textEditor.addEventListener('dblclick', async () => {
-        const selectedText = window.getSelection()?.toString()?.trim() || '';
-        const words = extractWordsFromSelection(selectedText);
+        const words = getWordsFromCurrentSelection();
 
         if (words.length === 0) {
             return;
