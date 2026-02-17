@@ -463,7 +463,7 @@ function rankTranslationCandidates(word, candidates, dictionaryCandidates) {
                 score += 2;
             }
 
-            if (/^[\p{L}\p{M}'’-\s]+$/u.test(candidate)) {
+            if (/^[\p{L}\p{M}'’\-\s]+$/u.test(candidate)) {
                 score += 1;
             }
 
