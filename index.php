@@ -384,6 +384,19 @@ function ensureTextExamples(words) {
     }
 }
 
+function seedWordDetailsFromDictionary(words) {
+    for (const word of words) {
+        const existing = wordDetails.get(word) || { suggestions: [], examples: [] };
+        const dictionarySuggestions = translationDictionary.get(word.toLowerCase()) || [];
+
+        if (existing.suggestions.length === 0 && dictionarySuggestions.length > 0) {
+            existing.suggestions = dictionarySuggestions;
+        }
+
+        wordDetails.set(word, existing);
+    }
+}
+
 function buildSelectedWordsPayload() {
     return Array.from(selectedWords.entries()).map(([word, count]) => ({
         word,
@@ -663,6 +676,7 @@ if (textEditor) {
         }
 
         applyHighlights();
+        seedWordDetailsFromDictionary(words);
         ensureTextExamples(words);
         updateSelectionTable();
         await updateWordDetails(words);
