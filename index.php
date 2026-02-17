@@ -100,13 +100,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
-            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            background: #f3f4f6;
             min-height: 100vh;
+            color: #111827;
         }
         .app-card {
-            border: 0;
+            border: 1px solid #e5e7eb;
             border-radius: 1rem;
-            box-shadow: 0 0.5rem 1.25rem rgba(0,0,0,.08);
+            box-shadow: 0 12px 32px rgba(17, 24, 39, .06);
+            background: #ffffff;
+        }
+        .app-title {
+            margin: 0;
+            font-size: clamp(1.35rem, 2vw, 1.8rem);
+            font-weight: 650;
+            letter-spacing: -0.02em;
+            color: #0f172a;
+        }
+        .app-title-mark {
+            display: inline-block;
+            width: .55rem;
+            height: .55rem;
+            margin-right: .55rem;
+            border-radius: 50%;
+            background: #0f172a;
+            vertical-align: middle;
+            transform: translateY(-1px);
+        }
+        .app-title-subtitle {
+            margin: .35rem 0 0;
+            color: #6b7280;
+            font-size: .95rem;
         }
         #textEditor {
             min-height: 260px;
@@ -116,6 +140,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         #translationEditor {
             min-height: 260px;
             resize: vertical;
+        }
+        #textEditor,
+        #translationEditor,
+        .dictionary-example {
+            border: 1px solid #d1d5db;
+            border-radius: .75rem;
+            background: #fff;
+            transition: border-color .2s ease, box-shadow .2s ease;
+        }
+        #textEditor:focus,
+        #translationEditor:focus,
+        .dictionary-example:focus {
+            border-color: #9ca3af;
+            box-shadow: 0 0 0 .15rem rgba(156, 163, 175, .2);
         }
         #textEditor:empty::before {
             content: attr(data-placeholder);
@@ -140,6 +178,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-color: #ffa94d;
             color: #4a2f00;
         }
+        .dictionary-block {
+            border: 1px solid #e5e7eb;
+            border-radius: .9rem;
+            background: #fafafa;
+            padding: 1rem;
+        }
+        .dictionary-table {
+            margin-bottom: 0;
+            --bs-table-bg: transparent;
+            --bs-table-striped-bg: #f3f4f6;
+        }
+        .dictionary-table thead th {
+            text-transform: uppercase;
+            letter-spacing: .04em;
+            font-size: .74rem;
+            color: #6b7280;
+            border-bottom-color: #d1d5db;
+        }
+        .dictionary-table td {
+            padding-top: .8rem;
+            padding-bottom: .8rem;
+            border-color: #e5e7eb;
+            vertical-align: top;
+        }
+        .dictionary-word {
+            font-weight: 600;
+            color: #111827;
+        }
+        .dictionary-translation {
+            color: #374151;
+        }
+        .dictionary-example {
+            min-height: 96px;
+            resize: vertical;
+            font-size: .9rem;
+            line-height: 1.45;
+        }
     </style>
 </head>
 <body>
@@ -148,8 +223,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="col-12 col-xl-11">
             <div class="card app-card">
                 <div class="card-body p-3 p-md-4 p-lg-5">
-                    <h1 class="h3 mb-3">📝 Текст и словарь</h1>
-                    <p class="text-muted mb-4">Вставь готовый текст. Выделяй немецкое выражение и нажимай «зберегти вираз», чтобы добавить его в словарь и подсветить в тексте.</p>
+                    <h1 class="app-title"><span class="app-title-mark"></span>Текст · словарь</h1>
+                    <p class="app-title-subtitle mb-4">Вставь готовый текст. Выделяй немецкое выражение и нажимай «зберегти вираз», чтобы добавить его в словарь и подсветить в тексте.</p>
 
                     <div class="row g-3">
                         <div class="col-12 col-lg-6">
@@ -176,10 +251,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <small class="text-muted d-block mt-2" id="selectionHint">Выдели выражение и нажми «зберегти вираз».</small>
                     <small class="text-muted d-block mt-2" id="saveStatus"></small>
 
-                    <div class="mt-4 d-none" id="selectionTableBlock">
+                    <div class="mt-4 d-none dictionary-block" id="selectionTableBlock">
                         <label class="form-label fw-semibold">Wörterbuch</label>
                         <div class="table-responsive">
-                            <table class="table table-sm table-striped align-middle mb-0" id="selectionTable">
+                            <table class="table table-sm table-striped align-middle dictionary-table" id="selectionTable">
                                 <thead>
                                 <tr>
                                     <th scope="col">Deutsches Wort</th>
@@ -335,6 +410,7 @@ function updateSelectionTable() {
         const row = document.createElement('tr');
 
         const wordCell = document.createElement('td');
+        wordCell.className = 'dictionary-word';
         wordCell.textContent = word;
 
         const details = wordDetails.get(word) || { suggestions: [], examples: [] };
@@ -353,11 +429,12 @@ function updateSelectionTable() {
         }
 
         const suggestionsCell = document.createElement('td');
+        suggestionsCell.className = 'dictionary-translation';
         suggestionsCell.textContent = primaryTranslation;
 
         const examplesCell = document.createElement('td');
         const examplesInput = document.createElement('textarea');
-        examplesInput.className = 'form-control form-control-sm';
+        examplesInput.className = 'form-control form-control-sm dictionary-example';
         examplesInput.rows = 3;
         examplesInput.placeholder = 'Автоматично додано приклад з тексту. Можна редагувати та дописувати свої приклади.';
         examplesInput.value = initialExamples.join('\n');
