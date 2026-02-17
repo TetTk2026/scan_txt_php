@@ -466,6 +466,36 @@ async function requestProviderTranslation(provider, word) {
     return translation || null;
 }
 
+async function requestMyMemoryTranslation(word) {
+    const params = new URLSearchParams({
+        q: word,
+        langpair: 'de|uk'
+    });
+
+    const response = await fetch(`https://api.mymemory.translated.net/get?${params.toString()}`);
+    if (!response.ok) {
+        throw new Error('MyMemory request failed');
+    }
+
+    const payload = await response.json();
+    const candidates = [];
+
+    const primary = extractTranslationFromPayload(payload?.responseData?.translatedText || '');
+    if (primary) {
+        candidates.push(primary);
+    }
+
+    const matches = Array.isArray(payload?.matches) ? payload.matches : [];
+    for (const match of matches) {
+        const translation = extractTranslationFromPayload(match?.translation || '');
+        if (translation) {
+            candidates.push(translation);
+        }
+    }
+
+    return [...new Set(candidates)];
+}
+
 function extractTranslationFromPayload(payload) {
     if (typeof payload === 'string') {
         return payload.trim();
@@ -529,6 +559,13 @@ async function buildWordDetailsWithOptionB(word) {
 
     const dictionaryCandidates = translationDictionary.get(word.toLowerCase()) || [];
     const providerResults = [];
+
+    try {
+        const myMemoryResults = await requestMyMemoryTranslation(word);
+        providerResults.push(...myMemoryResults);
+    } catch (error) {
+        // MyMemory failed: continue with other providers/dictionary ranking.
+    }
 
     for (const provider of providers) {
         try {
