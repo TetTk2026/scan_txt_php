@@ -295,6 +295,7 @@ function applyHighlights() {
 function updateSelectionTable() {
     selectionTableBody.innerHTML = '';
     const entries = Array.from(selectedWords.entries()).sort((a, b) => b[1] - a[1]);
+    const sourceText = getPlainText();
 
     if (entries.length === 0) {
         selectionTableBlock.classList.add('d-none');
@@ -309,7 +310,8 @@ function updateSelectionTable() {
 
         const details = wordDetails.get(word) || { suggestions: [], examples: [] };
         const primaryTranslation = details.suggestions[0] || '…';
-        const textExample = details.examples[0] || '—';
+        const sentenceExample = findSentenceForWord(sourceText, word);
+        const textExample = sentenceExample || details.examples[0] || '—';
 
         const suggestionsCell = document.createElement('td');
         suggestionsCell.textContent = primaryTranslation;
@@ -324,6 +326,31 @@ function updateSelectionTable() {
     }
 
     selectionTableBlock.classList.remove('d-none');
+}
+
+function findSentenceForWord(text, word) {
+    if (!text.trim() || !word) {
+        return '';
+    }
+
+    const sentenceParts = text
+        .split(/(?<=[.!?…])\s+|\n+/u)
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+    if (sentenceParts.length === 0) {
+        return '';
+    }
+
+    const needle = word.toLowerCase();
+    for (const sentence of sentenceParts) {
+        const words = extractWordsFromSelection(sentence);
+        if (words.includes(needle)) {
+            return sentence;
+        }
+    }
+
+    return '';
 }
 
 function extractWordsFromSelection(value) {
@@ -593,9 +620,14 @@ if (textEditor) {
         for (const word of uniqueWords) {
             try {
                 const details = await buildWordDetailsWithOptionB(word);
+                const sentenceExample = findSentenceForWord(getPlainText(), word);
+                if (sentenceExample && !details.examples.includes(sentenceExample)) {
+                    details.examples = [sentenceExample, ...details.examples];
+                }
                 wordDetails.set(word, details);
             } catch (error) {
-                wordDetails.set(word, { suggestions: ['—'], examples: [] });
+                const sentenceExample = findSentenceForWord(getPlainText(), word);
+                wordDetails.set(word, { suggestions: ['—'], examples: sentenceExample ? [sentenceExample] : [] });
             }
         }
         updateSelectionTable();
