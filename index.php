@@ -348,62 +348,6 @@ function getWordsFromCurrentSelection() {
 }
 
 
-function extractExampleSentence(text, word) {
-    if (!text || !word) {
-        return '';
-    }
-
-    const chunks = text
-        .split(/(?<=[.!?])\s+|\n+/u)
-        .map((chunk) => chunk.trim())
-        .filter(Boolean);
-
-    const wordRegex = new RegExp(`(^|[^\p{L}\p{M}'’-])${escapeRegExp(word)}(?=$|[^\p{L}\p{M}'’-])`, 'iu');
-    const found = chunks.find((chunk) => wordRegex.test(chunk));
-
-    if (found) {
-        return found;
-    }
-
-    return chunks[0] || '';
-}
-
-function ensureTextExamples(words) {
-    const sourceText = getPlainText();
-
-    for (const word of words) {
-        const details = wordDetails.get(word) || { suggestions: [], examples: [] };
-        if (!details.examples.length) {
-            const example = extractExampleSentence(sourceText, word);
-            if (example) {
-                details.examples = [example];
-            }
-        }
-
-        wordDetails.set(word, details);
-    }
-}
-
-function seedWordDetailsFromDictionary(words) {
-    for (const word of words) {
-        const dictionarySuggestions = translationDictionary.get(word.toLowerCase()) || [];
-
-        // ❗ если в локальном словаре нет перевода — ничего не записываем,
-        // чтобы позже мог выполниться MyMemory
-        if (dictionarySuggestions.length === 0) {
-            continue;
-        }
-
-        const existing = wordDetails.get(word) || { suggestions: [], examples: [] };
-
-        if (existing.suggestions.length === 0) {
-            existing.suggestions = dictionarySuggestions;
-        }
-
-        wordDetails.set(word, existing);
-    }
-}
-
 function buildSelectedWordsPayload() {
     return Array.from(selectedWords.entries()).map(([word, count]) => ({
         word,
@@ -434,44 +378,6 @@ const translationDictionary = new Map([
     ['groß', ['великий']],
     ['klein', ['малий', 'маленький']]
 ]);
-
-function getConfiguredMtProviders() {
-    const providers = window.translationProviders;
-    return Array.isArray(providers) ? providers.filter(Boolean) : [];
-}
-
-async function requestProviderTranslation(provider, word) {
-    const endpoint = String(provider?.endpoint || '').trim();
-    if (!endpoint) {
-        return null;
-    }
-
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            text: word,
-            q: word,
-            sourceLang: 'de',
-            targetLang: 'uk',
-            source: 'de',
-            target: 'uk',
-            from: 'de',
-            to: 'uk',
-            provider: provider.name || 'mt-provider'
-        })
-    });
-
-    if (!response.ok) {
-        throw new Error('MT provider request failed');
-    }
-
-    const payload = await response.json();
-    const translation = extractTranslationFromPayload(payload);
-    return translation || null;
-}
 
 async function requestMyMemoryTranslation(word) {
     const params = new URLSearchParams({
@@ -562,27 +468,14 @@ function rankTranslationCandidates(word, candidates, dictionaryCandidates) {
 
 async function buildWordDetailsWithOptionB(word) {
     const fallback = { suggestions: ['—'], examples: [] };
-    const providers = getConfiguredMtProviders();
-
     const dictionaryCandidates = translationDictionary.get(word.toLowerCase()) || [];
-    const providerResults = [];
+    const providerResults = [...dictionaryCandidates];
 
     try {
         const myMemoryResults = await requestMyMemoryTranslation(word);
         providerResults.push(...myMemoryResults);
     } catch (error) {
         console.warn('MyMemory failed:', error);
-    }
-
-    for (const provider of providers) {
-        try {
-            const result = await requestProviderTranslation(provider, word);
-            if (result) {
-                providerResults.push(result);
-            }
-        } catch (error) {
-            // Provider failed: ignore and continue with other providers/dictionary ranking.
-        }
     }
 
     const ranked = rankTranslationCandidates(word, providerResults, dictionaryCandidates).slice(0, 4);
@@ -695,15 +588,9 @@ if (textEditor) {
         }
 
         applyHighlights();
-        seedWordDetailsFromDictionary(words);
-        ensureTextExamples(words);
         updateSelectionTable();
         const uniqueWords = [...new Set(words)];
         for (const word of uniqueWords) {
-            if (wordDetails.has(word)) {
-                continue;
-            }
-
             try {
                 const details = await buildWordDetailsWithOptionB(word);
                 wordDetails.set(word, details);
@@ -711,8 +598,6 @@ if (textEditor) {
                 wordDetails.set(word, { suggestions: ['—'], examples: [] });
             }
         }
-
-        ensureTextExamples(words);
         updateSelectionTable();
 
         if (selectionHint) {
