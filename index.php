@@ -327,6 +327,9 @@ function buildSelectedWordsPayload() {
     }));
 }
 
+const TRANSLATION_PIPELINE_MODE = 'Option B: Klassische MT + Wörterbuch + Ranking';
+const TRANSLATION_BASELINE = 'DeepL/Google/Microsoft als Basistranslation.';
+
 const translationDictionary = new Map([
     ['haus', ['будинок', 'дім']],
     ['straße', ['вулиця', 'дорога']],
@@ -411,7 +414,7 @@ function rankTranslationCandidates(word, candidates, dictionaryCandidates) {
 }
 
 async function buildWordDetailsWithOptionB(word) {
-    const fallback = { suggestions: ['—'], examples: [] };
+    const fallback = { suggestions: ['—'], examples: [TRANSLATION_PIPELINE_MODE] };
     const providers = getConfiguredMtProviders();
 
     const providerResults = [];
@@ -433,9 +436,18 @@ async function buildWordDetailsWithOptionB(word) {
         return fallback;
     }
 
+    const examples = [
+        TRANSLATION_PIPELINE_MODE,
+        TRANSLATION_BASELINE
+    ];
+
+    if (providers.length === 0) {
+        examples.push('Hinweis: Keine MT-Provider konfiguriert, Ranking basiert aktuell auf Wörterbuchdaten.');
+    }
+
     return {
         suggestions: ranked,
-        examples: []
+        examples
     };
 }
 
