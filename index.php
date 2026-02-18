@@ -577,6 +577,61 @@ function getExpressionFromCurrentSelection() {
     return selection.toString().replace(/\s+/g, ' ').trim();
 }
 
+async function copyTextWithFallback(text, fallbackSourceElement = null) {
+    const normalizedText = (text || '').trim();
+    if (!normalizedText) {
+        throw new Error('EMPTY_TEXT');
+    }
+
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(normalizedText);
+        return true;
+    }
+
+    let tempTextarea = null;
+    const sourceElement = fallbackSourceElement instanceof HTMLTextAreaElement
+        ? fallbackSourceElement
+        : null;
+
+    const target = sourceElement || (() => {
+        tempTextarea = document.createElement('textarea');
+        tempTextarea.value = normalizedText;
+        tempTextarea.setAttribute('readonly', '');
+        tempTextarea.style.position = 'fixed';
+        tempTextarea.style.opacity = '0';
+        tempTextarea.style.pointerEvents = 'none';
+        tempTextarea.style.left = '-9999px';
+        document.body.appendChild(tempTextarea);
+        return tempTextarea;
+    })();
+
+    const previousSelectionStart = sourceElement ? sourceElement.selectionStart : null;
+    const previousSelectionEnd = sourceElement ? sourceElement.selectionEnd : null;
+
+    try {
+        if (sourceElement) {
+            sourceElement.value = normalizedText;
+        }
+        target.focus();
+        target.select();
+        target.setSelectionRange(0, normalizedText.length);
+
+        const successful = document.execCommand('copy');
+        if (!successful) {
+            throw new Error('EXEC_COMMAND_FAILED');
+        }
+        return true;
+    } finally {
+        if (sourceElement) {
+            sourceElement.setSelectionRange(previousSelectionStart ?? 0, previousSelectionEnd ?? 0);
+            sourceElement.blur();
+        }
+        if (tempTextarea && tempTextarea.parentNode) {
+            tempTextarea.parentNode.removeChild(tempTextarea);
+        }
+    }
+}
+
 
 function buildSelectedWordsPayload() {
     return Array.from(selectedWords.entries()).map(([word, count]) => ({
@@ -986,7 +1041,11 @@ if (copyNojiBtn) {
 
 if (copySelectedWordsBtn) {
     copySelectedWordsBtn.addEventListener('click', async () => {
-        if (!selectedWordsOutput || !selectedWordsOutput.value.trim()) {
+        if (!copySelectedWordsBtn || !selectedWordsOutput) {
+            return;
+        }
+
+        if (!selectedWordsOutput.value.trim()) {
             if (saveStatus) {
                 saveStatus.textContent = 'Пока нет выделенных слов для копирования.';
             }
@@ -1010,12 +1069,13 @@ if (copySelectedWordsBtn) {
         copySelectedWordsBtn.disabled = true;
 
         try {
-            await navigator.clipboard.writeText(wordsToCopy);
+            await copyTextWithFallback(wordsToCopy, selectedWordsOutput);
             copySelectedWordsBtn.textContent = 'Скопировано!';
             if (saveStatus) {
                 saveStatus.textContent = 'Список выделенных слов скопирован.';
             }
         } catch (error) {
+            copySelectedWordsBtn.textContent = 'Ошибка';
             if (saveStatus) {
                 saveStatus.textContent = 'Не удалось скопировать список слов.';
             }
