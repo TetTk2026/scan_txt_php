@@ -286,7 +286,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <textarea
                                 id="selectedWordsOutput"
                                 class="form-control selected-words-output"
-                                readonly
                                 placeholder="Тут появятся все выделенные слова через запятую."
                             ></textarea>
                             <div class="d-flex justify-content-start mt-2">
@@ -994,11 +993,24 @@ if (copySelectedWordsBtn) {
             return;
         }
 
+        const wordsToCopy = selectedWordsOutput.value
+            .split(',')
+            .map((word) => word.trim())
+            .filter(Boolean)
+            .join(', ');
+
+        if (!wordsToCopy) {
+            if (saveStatus) {
+                saveStatus.textContent = 'Пока нет выделенных слов для копирования.';
+            }
+            return;
+        }
+
         const originalLabel = copySelectedWordsBtn.textContent;
         copySelectedWordsBtn.disabled = true;
 
         try {
-            await navigator.clipboard.writeText(selectedWordsOutput.value);
+            await navigator.clipboard.writeText(wordsToCopy);
             copySelectedWordsBtn.textContent = 'Скопировано!';
             if (saveStatus) {
                 saveStatus.textContent = 'Список выделенных слов скопирован.';
