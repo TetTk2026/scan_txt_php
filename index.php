@@ -164,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             padding: 0 .1em;
             border-radius: .2em;
         }
-        .save-expression-btn {
+        .pill-action-btn {
             background-color: #ffd8a8;
             border-color: #ffc078;
             color: #5c3b00;
@@ -172,16 +172,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             padding-left: 1rem;
             padding-right: 1rem;
         }
-        .save-expression-btn:hover,
-        .save-expression-btn:focus {
+        .pill-action-btn:hover,
+        .pill-action-btn:focus {
             background-color: #ffc078;
             border-color: #ffa94d;
             color: #4a2f00;
-        }
-        .copy-noji-btn {
-            border-radius: 999px;
-            padding-left: 1rem;
-            padding-right: 1rem;
         }
         .dictionary-block {
             border: 1px solid #e5e7eb;
@@ -254,12 +249,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <div class="d-flex justify-content-between mt-2">
                         <small class="text-muted"><span id="charCount">0</span> Zeichen</small>
-                        <button class="btn btn-outline-secondary btn-sm" id="copyBtn" type="button">Text kopieren</button>
+                        <button class="btn btn-sm pill-action-btn" id="copyBtn" type="button">Text kopieren</button>
                     </div>
 
                     <div class="d-grid gap-2 d-md-flex justify-content-md-start mt-3">
-                        <button class="btn btn-sm save-expression-btn" id="saveExpressionBtn" type="button">зберегти вираз</button>
-                        <button class="btn btn-sm btn-outline-primary copy-noji-btn d-none" id="copyNojiBtn" type="button">Noji-Import kopieren</button>
+                        <button class="btn btn-sm pill-action-btn" id="saveExpressionBtn" type="button">зберегти вираз</button>
+                        <button class="btn btn-sm pill-action-btn d-none" id="copyNojiBtn" type="button">Noji-Import kopieren</button>
                     </div>
 
                     <div class="alert alert-danger mt-4 mb-0 d-none" role="alert" id="errorMessage"></div>
@@ -288,8 +283,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 class="form-control selected-words-output"
                                 placeholder="Тут появятся все выделенные слова через запятую."
                             ></textarea>
-                            <div class="d-flex justify-content-start mt-2">
-                                <button class="btn btn-sm btn-outline-secondary" id="copySelectedWordsBtn" type="button">Копировать</button>
+                            <div class="d-flex justify-content-start mt-2 gap-2 flex-wrap">
+                                <button class="btn btn-sm pill-action-btn" id="copySelectedWordsBtn" type="button">Text kopieren</button>
+                                <button class="btn btn-sm pill-action-btn" id="copyDictionaryTextBtn" type="button">Text kopieren</button>
                             </div>
                         </div>
                     </div>
@@ -314,6 +310,7 @@ const copyNojiBtn = document.getElementById('copyNojiBtn');
 const saveStatus = document.getElementById('saveStatus');
 const selectedWordsOutput = document.getElementById('selectedWordsOutput');
 const copySelectedWordsBtn = document.getElementById('copySelectedWordsBtn');
+const copyDictionaryTextBtn = document.getElementById('copyDictionaryTextBtn');
 
 const selectedWords = new Map();
 const wordDetails = new Map();
@@ -995,14 +992,33 @@ if (textEditor) {
 
 if (copyBtn) {
     copyBtn.addEventListener('click', async () => {
+        const plainText = getPlainText();
+        if (!plainText.trim()) {
+            if (saveStatus) {
+                saveStatus.textContent = 'Kein Text zum Kopieren vorhanden.';
+            }
+            return;
+        }
+
+        const originalLabel = copyBtn.textContent;
+        copyBtn.disabled = true;
+
         try {
-            await navigator.clipboard.writeText(getPlainText());
+            await copyTextWithFallback(plainText);
             copyBtn.textContent = 'Kopiert!';
-            setTimeout(() => {
-                copyBtn.textContent = 'Text kopieren';
-            }, 1200);
+            if (saveStatus) {
+                saveStatus.textContent = 'Text wurde in die Zwischenablage kopiert.';
+            }
         } catch (error) {
-            copyBtn.textContent = 'Kopieren fehlgeschlagen';
+            copyBtn.textContent = 'Fehler';
+            if (saveStatus) {
+                saveStatus.textContent = 'Text konnte nicht kopiert werden.';
+            }
+        } finally {
+            setTimeout(() => {
+                copyBtn.disabled = false;
+                copyBtn.textContent = originalLabel;
+            }, 1200);
         }
     });
 }
@@ -1083,6 +1099,48 @@ if (copySelectedWordsBtn) {
             setTimeout(() => {
                 copySelectedWordsBtn.disabled = false;
                 copySelectedWordsBtn.textContent = originalLabel;
+            }, 1200);
+        }
+    });
+}
+
+if (copyDictionaryTextBtn) {
+    copyDictionaryTextBtn.addEventListener('click', async () => {
+        if (!selectedWordsOutput) {
+            return;
+        }
+
+        const dictionaryText = selectedWordsOutput.value
+            .split(',')
+            .map((word) => word.trim())
+            .filter(Boolean)
+            .join(', ');
+
+        if (!dictionaryText) {
+            if (saveStatus) {
+                saveStatus.textContent = 'Пока нет словаря для копирования.';
+            }
+            return;
+        }
+
+        const originalLabel = copyDictionaryTextBtn.textContent;
+        copyDictionaryTextBtn.disabled = true;
+
+        try {
+            await copyTextWithFallback(dictionaryText, selectedWordsOutput);
+            copyDictionaryTextBtn.textContent = 'Скопировано!';
+            if (saveStatus) {
+                saveStatus.textContent = 'Текст словаря скопирован.';
+            }
+        } catch (error) {
+            copyDictionaryTextBtn.textContent = 'Ошибка';
+            if (saveStatus) {
+                saveStatus.textContent = 'Не удалось скопировать текст словаря.';
+            }
+        } finally {
+            setTimeout(() => {
+                copyDictionaryTextBtn.disabled = false;
+                copyDictionaryTextBtn.textContent = originalLabel;
             }, 1200);
         }
     });
