@@ -262,7 +262,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <small class="text-muted d-block mt-2" id="saveStatus"></small>
 
                     <div class="mt-4 d-none dictionary-block" id="selectionTableBlock">
-                        <label class="form-label fw-semibold">Wörterbuch</label>
+                        <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-2">
+                            <label class="form-label fw-semibold mb-0">Wörterbuch</label>
+                            <button class="btn btn-sm pill-action-btn" id="copyDictionaryTextBtn" type="button">Text kopieren</button>
+                        </div>
                         <div class="table-responsive">
                             <table class="table table-sm table-striped align-middle dictionary-table" id="selectionTable">
                                 <thead>
@@ -285,7 +288,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ></textarea>
                             <div class="d-flex justify-content-start mt-2 gap-2 flex-wrap">
                                 <button class="btn btn-sm pill-action-btn" id="copySelectedWordsBtn" type="button">Text kopieren</button>
-                                <button class="btn btn-sm pill-action-btn" id="copyDictionaryTextBtn" type="button">Text kopieren</button>
                             </div>
                         </div>
                     </div>
@@ -512,6 +514,25 @@ function parseManualExamples(value) {
         .split('\n')
         .map((line) => line.trim())
         .filter(Boolean);
+}
+
+function buildDictionaryTableText() {
+    const rows = Array.from(selectionTableBody?.querySelectorAll('tr') || []);
+    if (rows.length === 0) {
+        return '';
+    }
+
+    const header = ['Deutsches Wort', 'Український переклад', 'Приклад'].join('\t');
+    const lines = rows.map((row) => {
+        const cells = row.querySelectorAll('td');
+        const word = cells[0]?.textContent?.trim() || '';
+        const translation = cells[1]?.textContent?.trim() || '';
+        const exampleField = cells[2]?.querySelector('textarea');
+        const example = exampleField?.value?.trim().replace(/\n+/g, ' | ') || '';
+        return [word, translation, example].join('\t');
+    });
+
+    return [header, ...lines].join('\n').trim();
 }
 
 function findSentenceForWord(text, word) {
@@ -1106,15 +1127,7 @@ if (copySelectedWordsBtn) {
 
 if (copyDictionaryTextBtn) {
     copyDictionaryTextBtn.addEventListener('click', async () => {
-        if (!selectedWordsOutput) {
-            return;
-        }
-
-        const dictionaryText = selectedWordsOutput.value
-            .split(',')
-            .map((word) => word.trim())
-            .filter(Boolean)
-            .join(', ');
+        const dictionaryText = buildDictionaryTableText();
 
         if (!dictionaryText) {
             if (saveStatus) {
@@ -1127,10 +1140,10 @@ if (copyDictionaryTextBtn) {
         copyDictionaryTextBtn.disabled = true;
 
         try {
-            await copyTextWithFallback(dictionaryText, selectedWordsOutput);
+            await copyTextWithFallback(dictionaryText);
             copyDictionaryTextBtn.textContent = 'Скопировано!';
             if (saveStatus) {
-                saveStatus.textContent = 'Текст словаря скопирован.';
+                saveStatus.textContent = 'Таблица словаря скопирована.';
             }
         } catch (error) {
             copyDictionaryTextBtn.textContent = 'Ошибка';
