@@ -220,6 +220,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: .9rem;
             line-height: 1.45;
         }
+        .selected-words-output {
+            min-height: 82px;
+            resize: vertical;
+            font-size: .9rem;
+            line-height: 1.45;
+            border: 1px solid #d1d5db;
+            border-radius: .75rem;
+            background: #fff;
+        }
     </style>
 </head>
 <body>
@@ -271,6 +280,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <tbody id="selectionTableBody"></tbody>
                             </table>
                         </div>
+
+                        <div class="mt-3">
+                            <label for="selectedWordsOutput" class="form-label fw-semibold mb-1">Выделенные слова (через запятую)</label>
+                            <textarea
+                                id="selectedWordsOutput"
+                                class="form-control selected-words-output"
+                                readonly
+                                placeholder="Тут появятся все выделенные слова через запятую."
+                            ></textarea>
+                            <div class="d-flex justify-content-start mt-2">
+                                <button class="btn btn-sm btn-outline-secondary" id="copySelectedWordsBtn" type="button">Копировать</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -291,6 +313,8 @@ const selectionTableBody = document.getElementById('selectionTableBody');
 const saveExpressionBtn = document.getElementById('saveExpressionBtn');
 const copyNojiBtn = document.getElementById('copyNojiBtn');
 const saveStatus = document.getElementById('saveStatus');
+const selectedWordsOutput = document.getElementById('selectedWordsOutput');
+const copySelectedWordsBtn = document.getElementById('copySelectedWordsBtn');
 
 const selectedWords = new Map();
 const wordDetails = new Map();
@@ -413,6 +437,9 @@ function updateSelectionTable() {
         if (copyNojiBtn) {
             copyNojiBtn.classList.add('d-none');
         }
+        if (selectedWordsOutput) {
+            selectedWordsOutput.value = '';
+        }
         return;
     }
 
@@ -466,6 +493,9 @@ function updateSelectionTable() {
     selectionTableBlock.classList.remove('d-none');
     if (copyNojiBtn) {
         copyNojiBtn.classList.remove('d-none');
+    }
+    if (selectedWordsOutput) {
+        selectedWordsOutput.value = entries.map(([word]) => word).join(', ');
     }
 }
 
@@ -950,6 +980,37 @@ if (copyNojiBtn) {
             setTimeout(() => {
                 copyNojiBtn.disabled = false;
                 copyNojiBtn.textContent = originalLabel;
+            }, 1200);
+        }
+    });
+}
+
+if (copySelectedWordsBtn) {
+    copySelectedWordsBtn.addEventListener('click', async () => {
+        if (!selectedWordsOutput || !selectedWordsOutput.value.trim()) {
+            if (saveStatus) {
+                saveStatus.textContent = 'Пока нет выделенных слов для копирования.';
+            }
+            return;
+        }
+
+        const originalLabel = copySelectedWordsBtn.textContent;
+        copySelectedWordsBtn.disabled = true;
+
+        try {
+            await navigator.clipboard.writeText(selectedWordsOutput.value);
+            copySelectedWordsBtn.textContent = 'Скопировано!';
+            if (saveStatus) {
+                saveStatus.textContent = 'Список выделенных слов скопирован.';
+            }
+        } catch (error) {
+            if (saveStatus) {
+                saveStatus.textContent = 'Не удалось скопировать список слов.';
+            }
+        } finally {
+            setTimeout(() => {
+                copySelectedWordsBtn.disabled = false;
+                copySelectedWordsBtn.textContent = originalLabel;
             }, 1200);
         }
     });
