@@ -178,6 +178,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-color: #ffa94d;
             color: #4a2f00;
         }
+        .copy-noji-btn {
+            border-radius: 999px;
+            padding-left: 1rem;
+            padding-right: 1rem;
+        }
         .dictionary-block {
             border: 1px solid #e5e7eb;
             border-radius: .9rem;
@@ -245,6 +250,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <div class="d-grid gap-2 d-md-flex justify-content-md-start mt-3">
                         <button class="btn btn-sm save-expression-btn" id="saveExpressionBtn" type="button">зберегти вираз</button>
+                        <button class="btn btn-sm btn-outline-primary copy-noji-btn d-none" id="copyNojiBtn" type="button">Noji-Import kopieren</button>
                     </div>
 
                     <div class="alert alert-danger mt-4 mb-0 d-none" role="alert" id="errorMessage"></div>
@@ -283,6 +289,7 @@ const selectionHint = document.getElementById('selectionHint');
 const selectionTableBlock = document.getElementById('selectionTableBlock');
 const selectionTableBody = document.getElementById('selectionTableBody');
 const saveExpressionBtn = document.getElementById('saveExpressionBtn');
+const copyNojiBtn = document.getElementById('copyNojiBtn');
 const saveStatus = document.getElementById('saveStatus');
 
 const selectedWords = new Map();
@@ -403,6 +410,9 @@ function updateSelectionTable() {
 
     if (entries.length === 0) {
         selectionTableBlock.classList.add('d-none');
+        if (copyNojiBtn) {
+            copyNojiBtn.classList.add('d-none');
+        }
         return;
     }
 
@@ -454,6 +464,21 @@ function updateSelectionTable() {
     }
 
     selectionTableBlock.classList.remove('d-none');
+    if (copyNojiBtn) {
+        copyNojiBtn.classList.remove('d-none');
+    }
+}
+
+function buildNojiImportText() {
+    const entries = Array.from(selectedWords.entries()).sort((a, b) => b[1] - a[1]);
+
+    return entries
+        .map(([word]) => {
+            const suggestions = wordDetails.get(word)?.suggestions || [];
+            const translation = suggestions[0] || '—';
+            return `${word}\t${translation}`;
+        })
+        .join('\n');
 }
 
 function parseManualExamples(value) {
@@ -894,6 +919,38 @@ if (copyBtn) {
             }, 1200);
         } catch (error) {
             copyBtn.textContent = 'Kopieren fehlgeschlagen';
+        }
+    });
+}
+
+if (copyNojiBtn) {
+    copyNojiBtn.addEventListener('click', async () => {
+        const importText = buildNojiImportText();
+        if (!importText.trim()) {
+            if (saveStatus) {
+                saveStatus.textContent = 'Keine Wörter für den Noji-Import vorhanden.';
+            }
+            return;
+        }
+
+        const originalLabel = copyNojiBtn.textContent;
+        copyNojiBtn.disabled = true;
+
+        try {
+            await navigator.clipboard.writeText(importText);
+            copyNojiBtn.textContent = 'Kopiert!';
+            if (saveStatus) {
+                saveStatus.textContent = 'Noji-Importformat kopiert (Vorderseite↹Rückseite, Zeilenumbruch pro Karte).';
+            }
+        } catch (error) {
+            if (saveStatus) {
+                saveStatus.textContent = 'Noji-Import konnte nicht in die Zwischenablage kopiert werden.';
+            }
+        } finally {
+            setTimeout(() => {
+                copyNojiBtn.disabled = false;
+                copyNojiBtn.textContent = originalLabel;
+            }, 1200);
         }
     });
 }
